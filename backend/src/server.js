@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const fs = require('fs');
 const { uploadsDir, frontendDist } = require('./config/paths');
 
 // Load environment variables
@@ -99,6 +100,27 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
+function assertFrontendDist() {
+  const indexHtml = path.join(frontendDist, 'index.html');
+  if (!fs.existsSync(indexHtml)) {
+    console.error(
+      `[frontend] Нет сборки: ${indexHtml}\n` +
+      '  cd frontend && npm run build\n' +
+      '  или: /opt/aicrmpro/deploy/sync-live.sh'
+    );
+    process.exit(1);
+  }
+  const assetsDir = path.join(frontendDist, 'assets');
+  if (fs.existsSync(assetsDir)) {
+    const bundles = fs.readdirSync(assetsDir).filter((f) => /^index-.*\.(js|css)$/.test(f));
+    if (bundles.length) {
+      console.log(`[frontend] ${frontendDist} → ${bundles.join(', ')}`);
+    }
+  }
+}
+
+assertFrontendDist();
+
 app.listen(PORT, async () => {
   await cleanupPastScheduleExceptions();
   console.log(`Сервер запущен на порту ${PORT}`);

@@ -170,7 +170,13 @@ async function syncClientAvatar(ctx) {
   try {
     await axios.post(
       `${BACKEND_URL}/api/client/sync-avatar`,
-      { channel: 'telegram', userId, photoUrl: photoUrl || undefined, name },
+      {
+        channel: 'telegram',
+        userId,
+        photoUrl: photoUrl || undefined,
+        name,
+        username: ctx.from.username || undefined
+      },
       { timeout: 15000 }
     );
   } catch (err) {

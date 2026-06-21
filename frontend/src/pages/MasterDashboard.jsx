@@ -1,9 +1,9 @@
 import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, Phone, Send, MessageCircle } from 'lucide-react';
+import { ChevronRight, Phone, ExternalLink } from 'lucide-react';
 import { AuthContext } from '../App';
 import { useToast } from '../context/ToastContext';
-import DashboardLayout, { StatCard, MiniChart } from '../components/layout/DashboardLayout';
+import DashboardLayout from '../components/layout/DashboardLayout';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -16,11 +16,12 @@ import EmptyState from '../components/ui/EmptyState';
 import { PageLoader } from '../components/ui/Spinner';
 import BookingLinkCard from '../components/dashboard/BookingLinkCard';
 import { DAYS, STATUS_LABELS, formatDate, formatDateTime, formatPrice, formatServicePrice } from '../lib/format';
+import { formatRuPhoneDisplay, isRuPhoneComplete, toTelHref } from '../lib/phoneRu';
 import { mediaUrl } from '../lib/media';
 import TeamMasterSelect from '../components/dashboard/TeamMasterSelect';
 import SalonMastersSection from '../components/dashboard/SalonMastersSection';
 import ClientDetailModal from '../components/dashboard/ClientDetailModal';
-import ClientCard from '../components/dashboard/ClientCard';
+import ClientsSection from '../components/dashboard/ClientsSection';
 import ClientAvatar from '../components/dashboard/ClientAvatar';
 import AnalyticsSection from '../components/dashboard/AnalyticsSection';
 import ReviewsSection from '../components/dashboard/ReviewsSection';
@@ -35,6 +36,9 @@ import BillingSection from '../components/dashboard/BillingSection';
 import BlacklistSection from '../components/dashboard/BlacklistSection';
 import VideoReelCard from '../components/dashboard/VideoReelCard';
 import ServicePriceModal from '../components/dashboard/ServicePriceModal';
+import OverviewStatsCard from '../components/dashboard/OverviewStatsCard';
+import AppointmentsSection from '../components/dashboard/AppointmentsSection';
+import ManualBookModal from '../components/dashboard/ManualBookModal';
 import { MASTER_SOCIAL_FIELDS } from '../lib/socialLinks';
 
 function buildScheduleDraft(apiSchedule) {
@@ -51,6 +55,11 @@ export default function MasterDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, logout, api } = useContext(AuthContext);
   const { toast } = useToast();
+  const isTeamMember = user?.role === 'team';
+  const TEAM_SECTIONS = useMemo(
+    () => new Set(['overview', 'appointments', 'clients', 'schedule', 'prices', 'portfolio', 'links', 'blacklist']),
+    []
+  );
 
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(() => searchParams.get('section') || 'overview');
@@ -84,7 +93,6 @@ export default function MasterDashboard() {
   const [exceptionForm, setExceptionForm] = useState({ exception_date: '', is_working: false, start_time: '09:00', end_time: '18:00' });
 
   const [showManualBook, setShowManualBook] = useState(false);
-  const [manualBookForm, setManualBookForm] = useState({ clientName: '', clientPhone: '', serviceName: '', servicePrice: '', appointmentTime: '', duration: 60 });
 
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
@@ -93,6 +101,7 @@ export default function MasterDashboard() {
   const [showAppointmentDetail, setShowAppointmentDetail] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
   const [messageTarget, setMessageTarget] = useState(null);
   const [clientMessage, setClientMessage] = useState('');
 
@@ -105,6 +114,9 @@ export default function MasterDashboard() {
   const [clientDeleteTarget, setClientDeleteTarget] = useState(null);
   const [deletingClient, setDeletingClient] = useState(false);
   const [messageTargetClient, setMessageTargetClient] = useState(null);
+  const [messageChannel, setMessageChannel] = useState(null);
+  const [appointmentContact, setAppointmentContact] = useState(null);
+  const [resolvingAppointmentId, setResolvingAppointmentId] = useState(null);
   const [navBadges, setNavBadges] = useState({ chatUnread: 0, reviewsPending: 0 });
 
   const refreshNavBadges = useCallback(async () => {
@@ -141,23 +153,36 @@ export default function MasterDashboard() {
 
   const loadData = useCallback(async () => {
     try {
-      const [profileRes, appointmentsRes, clientsRes, linkRes, teamRes] = await Promise.all([
-        api.get('/master/me/profile'),
+      const [appointmentsRes, clientsRes, linkRes] = await Promise.all([
         api.get('/appointments'),
         api.get('/master/me/clients'),
-        api.get('/master/me/link'),
+        api.get('/master/me/link')
+      ]);
+      setAppointments(appointmentsRes.data);
+      setClients(clientsRes.data);
+      setLinks(linkRes.data.links);
+
+      if (isTeamMember && user?.salonMasterId) {
+        setProfile({
+          name: user.name,
+          salon_name: user.salon_name,
+          logo_url: user.logo_url
+        });
+        setSelectedSalonMasterId(user.salonMasterId);
+        await loadTeamScoped(user.salonMasterId);
+        return;
+      }
+
+      const [profileRes, teamRes] = await Promise.all([
+        api.get('/master/me/profile'),
         api.get('/master/me/salon-masters')
       ]);
-
       const profileData = profileRes.data;
       const socialDefaults = Object.fromEntries(
         MASTER_SOCIAL_FIELDS.map((f) => [f.key, profileData[f.key] ?? ''])
       );
       setProfile(profileData);
       setProfileForm({ ...profileData, ...socialDefaults });
-      setAppointments(appointmentsRes.data);
-      setClients(clientsRes.data);
-      setLinks(linkRes.data.links);
 
       const active = teamRes.data.filter((m) => m.is_active !== false);
       setSalonMasters(teamRes.data);
@@ -171,9 +196,10 @@ export default function MasterDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [api, toast, loadTeamScoped, selectedSalonMasterId]);
+  }, [api, toast, loadTeamScoped, selectedSalonMasterId, isTeamMember, user]);
 
   const handleTeamMasterChange = async (teamId) => {
+    if (isTeamMember) return;
     setSelectedSalonMasterId(teamId);
     try {
       await loadTeamScoped(teamId);
@@ -195,16 +221,23 @@ export default function MasterDashboard() {
 
   useEffect(() => {
     const section = searchParams.get('section');
-    if (section) setActiveSection(section);
-  }, [searchParams]);
+    if (section) {
+      if (isTeamMember && !TEAM_SECTIONS.has(section)) {
+        setActiveSection('overview');
+      } else {
+        setActiveSection(section);
+      }
+    }
+  }, [searchParams, isTeamMember, TEAM_SECTIONS]);
 
   const handleSectionChange = useCallback(
     (id) => {
+      if (isTeamMember && !TEAM_SECTIONS.has(id)) return;
       setActiveSection(id);
       if (id === 'overview') setSearchParams({});
       else setSearchParams({ section: id });
     },
-    [setSearchParams]
+    [setSearchParams, isTeamMember, TEAM_SECTIONS]
   );
 
   const handleDeleteClient = async () => {
@@ -222,33 +255,6 @@ export default function MasterDashboard() {
       setDeletingClient(false);
     }
   };
-
-  const stats = useMemo(() => {
-    const upcoming = appointments.filter((a) => a.status === 'confirmed' && new Date(a.appointment_time) >= new Date());
-    const today = upcoming.filter((a) => new Date(a.appointment_time).toDateString() === new Date().toDateString());
-    const revenue = appointments
-      .filter((a) => a.status !== 'cancelled' && a.service_price)
-      .reduce((s, a) => s + Number(a.service_price), 0);
-    const weekChart = [0, 0, 0, 0, 0, 0, 0];
-    if (appointments.length > 0) {
-      const byDay = [0, 0, 0, 0, 0, 0, 0];
-      appointments.forEach((a) => {
-        const d = new Date(a.appointment_time).getDay();
-        const idx = d === 0 ? 6 : d - 1;
-        byDay[idx]++;
-      });
-      for (let i = 0; i < 7; i++) weekChart[i] = byDay[i];
-    }
-    return {
-      total: appointments.length,
-      upcoming: upcoming.length,
-      today: today.length,
-      clients: clients.length,
-      services: priceList.filter((p) => p.is_active !== false).length,
-      revenue,
-      weekChart
-    };
-  }, [appointments, clients, priceList]);
 
   const handleProfileUpdate = async () => {
     setSavingProfile(true);
@@ -445,26 +451,6 @@ export default function MasterDashboard() {
     }
   };
 
-  const handleManualBook = async (e) => {
-    e.preventDefault();
-    try {
-      await api.post('/appointments', {
-        clientName: manualBookForm.clientName,
-        clientPhone: manualBookForm.clientPhone,
-        serviceName: manualBookForm.serviceName,
-        servicePrice: manualBookForm.servicePrice ? Number(manualBookForm.servicePrice) : null,
-        appointmentTime: new Date(manualBookForm.appointmentTime).toISOString(),
-        duration: Number(manualBookForm.duration) || 60
-      });
-      toast('Запись создана');
-      setShowManualBook(false);
-      setManualBookForm({ clientName: '', clientPhone: '', serviceName: '', servicePrice: '', appointmentTime: '', duration: 60 });
-      loadData();
-    } catch (err) {
-      toast(err.response?.data?.error || 'Ошибка создания записи', 'error');
-    }
-  };
-
   const handleBroadcast = async () => {
     if (!broadcastMessage.trim()) return;
     try {
@@ -487,12 +473,61 @@ export default function MasterDashboard() {
     }
   };
 
-  const handleCancelAppointment = async () => {
-    if (!cancelTarget) return;
+  const handleResolveAppointment = async (id, status) => {
+    setResolvingAppointmentId(`${id}-${status}`);
     try {
-      await api.put(`/appointments/${cancelTarget.id}`, { status: 'cancelled' });
+      await api.put(`/appointments/${id}`, { status });
+      toast(status === 'completed' ? 'Визит завершён' : 'Отмечена неявка');
+      loadData();
+    } catch {
+      toast('Не удалось обновить запись', 'error');
+    } finally {
+      setResolvingAppointmentId(null);
+    }
+  };
+
+  const openAppointmentDetail = (apt) => {
+    setSelectedAppointment(apt);
+    setAppointmentContact(null);
+    setShowAppointmentDetail(true);
+  };
+
+  useEffect(() => {
+    if (!showAppointmentDetail || !selectedAppointment?.id) {
+      setAppointmentContact(null);
+      return undefined;
+    }
+    let cancelled = false;
+    api
+      .get(`/appointments/${selectedAppointment.id}/contact`)
+      .then((res) => {
+        if (!cancelled) setAppointmentContact(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setAppointmentContact(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, showAppointmentDetail, selectedAppointment?.id]);
+
+  const openCancelAppointment = (apt) => {
+    setCancelTarget(apt);
+    setCancelReason('');
+    setShowAppointmentDetail(false);
+  };
+
+  const handleCancelAppointment = async () => {
+    if (!cancelTarget || !cancelReason.trim()) return;
+    try {
+      await api.put(`/appointments/${cancelTarget.id}`, {
+        status: 'cancelled',
+        cancelReason: cancelReason.trim()
+      });
       toast('Запись отменена. Клиент уведомлён.');
       setCancelTarget(null);
+      setCancelReason('');
+      setSelectedAppointment(null);
       loadData();
     } catch {
       toast('Ошибка отмены', 'error');
@@ -516,7 +551,10 @@ export default function MasterDashboard() {
     if (!target) return;
     try {
       if (messageTargetClient) {
-        await api.post(`/master/me/clients/${messageTargetClient.id}/message`, { message: clientMessage });
+        await api.post(`/master/me/clients/${messageTargetClient.id}/message`, {
+          message: clientMessage,
+          channel: messageChannel || 'all'
+        });
       } else {
         await api.post(`/appointments/${messageTarget.id}/message`, { message: clientMessage });
       }
@@ -525,14 +563,23 @@ export default function MasterDashboard() {
       setClientMessage('');
       setMessageTarget(null);
       setMessageTargetClient(null);
+      setMessageChannel(null);
     } catch (err) {
       toast(err.response?.data?.error || 'Не удалось отправить сообщение', 'error');
     }
   };
 
-  const openClientMessage = (client) => {
+  const openAppointmentMessage = (apt) => {
+    setMessageTarget(apt);
+    setMessageTargetClient(null);
+    setClientMessage('');
+    setShowMessageModal(true);
+  };
+
+  const openClientMessage = (client, channel = null) => {
     setMessageTargetClient(client);
     setMessageTarget(null);
+    setMessageChannel(channel);
     setClientMessage('');
     setShowMessageModal(true);
   };
@@ -547,13 +594,14 @@ export default function MasterDashboard() {
       activeSection={activeSection}
       onSectionChange={handleSectionChange}
       navBadges={navBadges}
+      isTeamMember={isTeamMember}
       onLogout={() => {
         logout();
         navigate('/login');
       }}
     >
       {activeSection === 'overview' && (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {clientBookingUrl && (
             <BookingLinkCard
               url={clientBookingUrl}
@@ -563,49 +611,59 @@ export default function MasterDashboard() {
             />
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Сегодня" value={stats.today} trend={stats.today > 0 ? '+' : undefined} />
-            <StatCard label="Клиенты" value={stats.clients} />
-            <StatCard label="Выручка" value={formatPrice(stats.revenue)} accent="text-admin-accent" />
-            <StatCard label="Услуги" value={stats.services} />
-          </div>
+          <OverviewStatsCard api={api} isTeamMember={isTeamMember} />
 
-          <Card>
+          <div className="grid gap-5 lg:grid-cols-2">
+          <Card className="overflow-hidden">
             <CardHeader title="Записи на сегодня" action={<Button size="sm" variant="soft" onClick={() => setActiveSection('appointments')}>Все</Button>} />
-            {appointments.filter((a) => {
-              const d = new Date(a.appointment_time);
-              return d.toDateString() === new Date().toDateString() && a.status === 'confirmed';
-            }).length === 0 ? (
-              <p className="text-sm text-admin-textMuted py-4 text-center">На сегодня записей нет</p>
-            ) : (
-              <ul className="space-y-2">
-                {appointments
-                  .filter((a) => {
-                    const d = new Date(a.appointment_time);
-                    return d.toDateString() === new Date().toDateString();
-                  })
-                  .slice(0, 6)
-                  .map((apt) => (
-                    <li key={apt.id} className="flex items-center justify-between gap-3 rounded-xl bg-admin-surface px-4 py-3 border border-admin-border">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-sm font-bold text-admin-accent shrink-0">
-                          {new Date(apt.appointment_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <div className="min-w-0">
+            {(() => {
+              const todayAppointments = appointments
+                .filter((a) => {
+                  const d = new Date(a.appointment_time);
+                  return d.toDateString() === new Date().toDateString() && a.status === 'confirmed';
+                })
+                .sort((a, b) => new Date(a.appointment_time) - new Date(b.appointment_time));
+
+              if (todayAppointments.length === 0) {
+                return <p className="text-sm text-admin-textMuted py-4 text-center">На сегодня записей нет</p>;
+              }
+
+              return (
+                <ul className="space-y-2">
+                  {todayAppointments.map((apt) => (
+                    <li key={apt.id}>
+                      <button
+                        type="button"
+                        onClick={() => openAppointmentDetail(apt)}
+                        className="flex w-full items-center gap-3 rounded-xl border border-admin-border/80 bg-gradient-to-r from-white to-violet-50/30 px-4 py-3 text-left transition hover:border-admin-accent/30 hover:bg-violet-50/50"
+                      >
+                        <div className="shrink-0 text-center">
+                          <p className="text-[11px] font-medium text-admin-textMuted">
+                            {new Date(apt.appointment_time).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
+                          </p>
+                          <p className="text-sm font-bold text-admin-accent">
+                            {new Date(apt.appointment_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-admin-accent to-purple-400 flex items-center justify-center shrink-0">
+                          <span className="text-xs font-bold text-white">
+                            {(apt.client_name || 'Г')[0].toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
                           <p className="font-medium text-admin-text truncate">{apt.client_name || 'Клиент'}</p>
                           <p className="text-xs text-admin-textMuted truncate">{apt.service_name}</p>
                         </div>
-                      </div>
-                      <Badge tone={apt.status === 'confirmed' ? 'success' : apt.status === 'cancelled' ? 'danger' : 'warning'}>
-                        {STATUS_LABELS[apt.status]?.label || apt.status}
-                      </Badge>
+                        <ChevronRight size={14} className="text-admin-textMuted shrink-0" />
+                      </button>
                     </li>
                   ))}
-              </ul>
-            )}
+                </ul>
+              );
+            })()}
           </Card>
 
-          <Card>
+          <Card className="overflow-hidden">
             <CardHeader title="Последние клиенты" action={<Button size="sm" variant="ghost" onClick={() => setActiveSection('clients')}>Все</Button>} />
             {clients.length === 0 ? (
               <p className="text-sm text-admin-textMuted">Клиентов пока нет</p>
@@ -616,18 +674,19 @@ export default function MasterDashboard() {
                     key={c.id}
                     type="button"
                     onClick={() => setSelectedClientId(c.id)}
-                    className="flex items-center gap-3 rounded-xl bg-admin-surface p-3 w-full text-left hover:bg-admin-hover transition border border-admin-border"
+                    className="flex w-full items-center gap-3 rounded-xl border border-admin-border/80 bg-white p-3 text-left transition hover:border-violet-200 hover:bg-violet-50/40"
                   >
                     <ClientAvatar client={c} size="sm" />
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-sm text-admin-text truncate">{c.display_name || c.name || 'Клиент'}</p>
-                      <p className="text-xs text-admin-textMuted truncate">{c.phone || '—'}</p>
+                      <p className="text-xs text-admin-textMuted truncate">{c.phone_display || c.phone || c.client_phone || '—'}</p>
                     </div>
                   </button>
                 ))}
               </div>
             )}
           </Card>
+          </div>
         </div>
       )}
 
@@ -636,83 +695,13 @@ export default function MasterDashboard() {
       )}
 
       {activeSection === 'appointments' && (
-        <Card>
-          <CardHeader
-            title="Записи"
-            description="Управление визитами клиентов"
-            action={<Button onClick={() => setShowManualBook(true)}>+ Новая запись</Button>}
-          />
-          {appointments.length === 0 ? (
-            <EmptyState icon="◷" title="Записей пока нет" description="Клиенты появятся после бронирования по вашей ссылке или ручного добавления" actionLabel="Записать клиента" onAction={() => setShowManualBook(true)} />
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {(() => {
-                // Group appointments by date
-                const groups = {};
-                const sorted = [...appointments].sort((a, b) => new Date(a.appointment_time) - new Date(b.appointment_time));
-                sorted.forEach((apt) => {
-                  const day = new Date(apt.appointment_time).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-                  if (!groups[day]) groups[day] = [];
-                  groups[day].push(apt);
-                });
-
-                return Object.entries(groups).map(([day, dayAppts]) => (
-                  <div key={day}>
-                    {/* Day header */}
-                    <div className="sticky top-0 bg-admin-bg z-10 px-4 py-2">
-                      <p className="text-xs font-bold text-admin-textSecondary uppercase tracking-wide">{day}</p>
-                    </div>
-                    {/* Appointments for this day */}
-                    {dayAppts.map((apt) => {
-                      const st = STATUS_LABELS[apt.status] || STATUS_LABELS.confirmed;
-                      const isConfirmed = apt.status === 'confirmed';
-                      return (
-                        <button
-                          key={apt.id}
-                          type="button"
-                          onClick={() => { setSelectedAppointment(apt); setShowAppointmentDetail(true); }}
-                          className="w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-admin-bg transition"
-                        >
-                          {/* Time */}
-                          <div className="shrink-0 w-12 text-center">
-                            <p className="text-sm font-bold text-admin-accent">
-                              {new Date(apt.appointment_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                          </div>
-
-                          {/* Avatar */}
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-admin-accent to-purple-400 flex items-center justify-center shrink-0">
-                            <span className="text-xs font-bold text-white">
-                              {(apt.client_name || 'Г')[0].toUpperCase()}
-                            </span>
-                          </div>
-
-                          {/* Info */}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-admin-text truncate">{apt.client_name || 'Гость'}</p>
-                            <p className="text-xs text-admin-textMuted truncate">{apt.service_name}</p>
-                          </div>
-
-                          {/* Status */}
-                          <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
-                            st.tone === 'success' ? 'bg-green-100 text-green-700' :
-                            st.tone === 'danger' ? 'bg-red-100 text-red-700' :
-                            'bg-amber-100 text-amber-700'
-                          }`}>
-                            {st.label}
-                          </span>
-
-                          {/* Arrow */}
-                          <ChevronRight size={14} className="text-admin-textMuted shrink-0" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                ));
-              })()}
-            </div>
-          )}
-        </Card>
+        <AppointmentsSection
+          appointments={appointments}
+          onManualBook={() => setShowManualBook(true)}
+          onOpenDetail={openAppointmentDetail}
+          onResolve={handleResolveAppointment}
+          resolvingId={resolvingAppointmentId}
+        />
       )}
 
       {activeSection === 'reviews' && (
@@ -724,27 +713,16 @@ export default function MasterDashboard() {
       )}
 
       {activeSection === 'clients' && (
-        <Card>
-          <CardHeader title="Клиенты" description="Все, кто записывался к вам" action={<Button onClick={() => setShowBroadcast(true)}>Рассылка</Button>} />
-          {clients.length === 0 ? (
-            <EmptyState icon="◎" title="Клиентов пока нет" description="Они появятся после входа через MAX или Telegram" />
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {clients.map((c) => (
-                <ClientCard
-                  key={c.id}
-                  client={c}
-                  onOpen={(client) => setSelectedClientId(client.id)}
-                  onMessage={openClientMessage}
-                  onDelete={setClientDeleteTarget}
-                />
-              ))}
-            </div>
-          )}
-        </Card>
+        <ClientsSection
+          clients={clients}
+          onOpen={(client) => setSelectedClientId(client.id)}
+          onMessage={openClientMessage}
+          onDelete={setClientDeleteTarget}
+          onBroadcast={() => setShowBroadcast(true)}
+        />
       )}
 
-      {activeSection === 'team' && (
+      {activeSection === 'team' && !isTeamMember && (
         <SalonMastersSection masters={salonMasters} api={api} onChanged={loadData} toast={toast} />
       )}
 
@@ -752,7 +730,7 @@ export default function MasterDashboard() {
         <ScheduleSection
           scheduleDraft={scheduleDraft}
           exceptions={exceptions}
-          salonMasters={salonMasters}
+          salonMasters={isTeamMember ? [] : salonMasters}
           selectedSalonMasterId={selectedSalonMasterId}
           onMasterChange={handleTeamMasterChange}
           onDayChange={updateScheduleDay}
@@ -770,13 +748,15 @@ export default function MasterDashboard() {
 
       {activeSection === 'prices' && (
         <Card className="overflow-hidden">
-          <div className="mb-4 pb-4 border-b border-admin-border">
-            <TeamMasterSelect
-              masters={salonMasters}
-              value={selectedSalonMasterId}
-              onChange={handleTeamMasterChange}
-            />
-          </div>
+          {!isTeamMember && (
+            <div className="mb-4 pb-4 border-b border-admin-border">
+              <TeamMasterSelect
+                masters={salonMasters}
+                value={selectedSalonMasterId}
+                onChange={handleTeamMasterChange}
+              />
+            </div>
+          )}
           <CardHeader title="Услуги и прайс" description="Прайс привязан к выбранному мастеру" action={<Button onClick={() => openPriceModal()}>+ Услуга</Button>} />
           {priceList.length === 0 ? (
             <EmptyState icon="◇" title="Прайс пуст" description="Добавьте услуги с ценой и длительностью" actionLabel="Добавить услугу" onAction={() => openPriceModal()} />
@@ -835,11 +815,13 @@ export default function MasterDashboard() {
 
       {activeSection === 'portfolio' && (
         <div className="space-y-6">
-          <TeamMasterSelect
-            masters={salonMasters}
-            value={selectedSalonMasterId}
-            onChange={handleTeamMasterChange}
-          />
+          {!isTeamMember && (
+            <TeamMasterSelect
+              masters={salonMasters}
+              value={selectedSalonMasterId}
+              onChange={handleTeamMasterChange}
+            />
+          )}
           <Card>
             <CardHeader title="Загрузить медиа" description="Фото или видео появятся на странице записи" />
             <form onSubmit={handlePortfolioUpload} className="space-y-4">
@@ -1196,28 +1178,17 @@ export default function MasterDashboard() {
         </form>
       </Modal>
 
-      <Modal open={showManualBook} onClose={() => setShowManualBook(false)} title="Запись клиента" size="lg" footer={
-        <>
-          <Button variant="secondary" onClick={() => setShowManualBook(false)}>Отмена</Button>
-          <Button type="submit" form="manual-book-form">Создать</Button>
-        </>
-      }>
-        <form id="manual-book-form" onSubmit={handleManualBook} className="space-y-4">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Input label="Имя" value={manualBookForm.clientName} onChange={(e) => setManualBookForm({ ...manualBookForm, clientName: e.target.value })} />
-            <Input label="Телефон" value={manualBookForm.clientPhone} onChange={(e) => setManualBookForm({ ...manualBookForm, clientPhone: e.target.value })} />
-          </div>
-          <Input label="Услуга" required value={manualBookForm.serviceName} onChange={(e) => setManualBookForm({ ...manualBookForm, serviceName: e.target.value })} list="services-list" />
-          <datalist id="services-list">
-            {priceList.map((p) => <option key={p.id} value={p.name} />)}
-          </datalist>
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Input label="Цена" type="number" value={manualBookForm.servicePrice} onChange={(e) => setManualBookForm({ ...manualBookForm, servicePrice: e.target.value })} />
-            <Input label="Длительность, мин" type="number" value={manualBookForm.duration} onChange={(e) => setManualBookForm({ ...manualBookForm, duration: e.target.value })} />
-            <Input label="Дата и время" type="datetime-local" required value={manualBookForm.appointmentTime} onChange={(e) => setManualBookForm({ ...manualBookForm, appointmentTime: e.target.value })} />
-          </div>
-        </form>
-      </Modal>
+      <ManualBookModal
+        open={showManualBook}
+        onClose={() => setShowManualBook(false)}
+        clients={clients}
+        salonMasters={salonMasters}
+        isTeamMember={isTeamMember}
+        salonMasterId={isTeamMember ? user?.salonMasterId : selectedSalonMasterId || salonMasters[0]?.id}
+        api={api}
+        toast={toast}
+        onSuccess={loadData}
+      />
 
       <Modal open={showBroadcast} onClose={() => setShowBroadcast(false)} title="Рассылка" description="Сообщение уйдёт клиентам в MAX или Telegram" footer={
         <>
@@ -1239,17 +1210,16 @@ export default function MasterDashboard() {
             setClients(res.data);
           } catch { /* ignore */ }
         }}
-        onMessage={(client) => {
-          setSelectedClientId(null);
-          openClientMessage(client);
+        onMessage={(client, channel) => {
+          openClientMessage(client, channel);
         }}
         onRepeatInvite={async (client) => {
-          try {
-            await api.post(`/master/me/clients/${client.id}/repeat-invite`);
-            toast('Приглашение отправлено');
-          } catch (err) {
-            toast(err.response?.data?.error || 'Ошибка отправки', 'error');
-          }
+          const res = await api.post(`/master/me/clients/${client.id}/repeat-invite`);
+          return res.data;
+        }}
+        onDelete={(id) => {
+          setClients((items) => items.filter((item) => item.id !== id));
+          setSelectedClientId(null);
         }}
       />
 
@@ -1274,7 +1244,11 @@ export default function MasterDashboard() {
         </p>
       </Modal>
 
-      <Modal open={showMessageModal} onClose={() => { setShowMessageModal(false); setMessageTargetClient(null); }} title="Сообщение клиенту" footer={
+      <Modal open={showMessageModal} onClose={() => { setShowMessageModal(false); setMessageTargetClient(null); setMessageChannel(null); }} title={
+        messageChannel === 'telegram' ? 'Сообщение в Telegram' :
+        messageChannel === 'max' ? 'Сообщение в MAX' :
+        'Сообщение клиенту'
+      } footer={
         <>
           <Button variant="secondary" onClick={() => setShowMessageModal(false)}>Отмена</Button>
           <Button onClick={sendClientMessage}>Отправить</Button>
@@ -1294,7 +1268,7 @@ export default function MasterDashboard() {
             {selectedAppointment?.status === 'confirmed' && (
               <>
                 <Button onClick={() => { handleAppointmentStatus(selectedAppointment.id, 'completed'); setShowAppointmentDetail(false); }}>Завершить</Button>
-                <Button variant="danger" onClick={() => { setCancelTarget(selectedAppointment); setShowAppointmentDetail(false); }}>Отменить</Button>
+                <Button variant="danger" onClick={() => openCancelAppointment(selectedAppointment)}>Отменить</Button>
               </>
             )}
           </>
@@ -1303,6 +1277,13 @@ export default function MasterDashboard() {
         {selectedAppointment && (() => {
           const apt = selectedAppointment;
           const st = STATUS_LABELS[apt.status] || STATUS_LABELS.confirmed;
+          const contactPhone = appointmentContact?.phone || apt.client_phone;
+          const phoneDisplay = formatRuPhoneDisplay(contactPhone);
+          const phoneComplete = isRuPhoneComplete(contactPhone);
+          const telHref = toTelHref(contactPhone);
+          const isTelegram = apt.client_messenger === 'telegram';
+          const telegramUrl = appointmentContact?.telegramUrl;
+          const canMessageViaBot = appointmentContact?.canMessage ?? !!(apt.telegram_user_id || apt.max_user_id);
           return (
             <div className="space-y-4">
               {/* Status */}
@@ -1340,54 +1321,74 @@ export default function MasterDashboard() {
                   </div>
                   <div>
                     <p className="font-semibold text-admin-text">{apt.client_name || 'Гость'}</p>
-                    {apt.client_messenger === 'telegram' ? (
-                      <span className="text-xs text-sky-500 font-medium">Telegram</span>
+                    {phoneComplete ? (
+                      <p className="text-sm text-admin-text mt-0.5">{phoneDisplay}</p>
                     ) : (
-                      <span className="text-xs text-blue-500 font-medium">MAX</span>
+                      <p className="text-sm text-admin-textMuted mt-0.5">Телефон не указан</p>
                     )}
+                    <div className="mt-1 flex items-center gap-1.5">
+                      {isTelegram ? (
+                        <IconTelegram className="h-3.5 w-3.5 text-sky-500" />
+                      ) : (
+                        <MaxLogo className="h-3.5 w-3.5" />
+                      )}
+                      <span className={`text-xs font-medium ${isTelegram ? 'text-sky-500' : 'text-blue-500'}`}>
+                        {isTelegram ? 'Telegram' : 'MAX'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Contact buttons */}
                 <div className="flex flex-wrap gap-2">
-                  {apt.client_phone && (
+                  {phoneComplete && telHref && (
                     <a
-                      href={`tel:${apt.client_phone}`}
+                      href={telHref}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm font-medium hover:bg-green-100 transition"
                     >
                       <Phone size={14} />
-                      {apt.client_phone}
+                      {phoneDisplay}
                     </a>
                   )}
-                  {apt.client_messenger === 'telegram' && apt.telegram_user_id && (
+                  {isTelegram && telegramUrl && (
                     <a
-                      href={`https://t.me/${apt.telegram_user_id}`}
+                      href={telegramUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 text-sm font-medium hover:bg-sky-100 transition"
                     >
-                      <Send size={14} />
-                      Написать в TG
+                      <IconTelegram className="h-4 w-4" />
+                      Открыть в Telegram
+                      <ExternalLink size={12} className="opacity-60" />
                     </a>
                   )}
-                  {apt.client_messenger === 'max' && apt.max_user_id && (
-                    <a
-                      href={`https://max.ru/${apt.max_user_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 text-sm font-medium hover:bg-purple-100 transition"
+                  {!isTelegram && canMessageViaBot && (
+                    <Button
+                      size="sm"
+                      variant="soft"
+                      onClick={() => openAppointmentMessage(apt)}
+                      className="!text-purple-700"
                     >
-                      <MessageCircle size={14} />
+                      <MaxLogo className="h-4 w-4" />
                       Написать в MAX
-                    </a>
+                    </Button>
                   )}
                 </div>
+                {isTelegram && telegramUrl?.startsWith('tg://') && (
+                  <p className="mt-2 text-xs text-admin-textMuted">
+                    Ссылка откроет личный чат в приложении Telegram
+                  </p>
+                )}
+                {!isTelegram && canMessageViaBot && (
+                  <p className="mt-2 text-xs text-admin-textMuted">
+                    В MAX личный чат открывается через бота — клиент уже авторизован у вас
+                  </p>
+                )}
               </div>
 
-              {apt.notes && (
+              {apt.client_notes && (
                 <div>
-                  <p className="text-xs font-bold text-admin-textSecondary uppercase tracking-wide mb-1">Заметка</p>
-                  <p className="text-sm text-admin-textMuted">{apt.notes}</p>
+                  <p className="text-xs font-bold text-admin-textSecondary uppercase tracking-wide mb-1">Заметка клиента</p>
+                  <p className="text-sm text-admin-textMuted">{apt.client_notes}</p>
                 </div>
               )}
             </div>
@@ -1395,19 +1396,54 @@ export default function MasterDashboard() {
         })()}
       </Modal>
 
-      <Modal open={!!cancelTarget} onClose={() => setCancelTarget(null)} title="Отменить запись?" footer={
-        <>
-          <Button variant="secondary" onClick={() => setCancelTarget(null)}>Не отменять</Button>
-          <Button onClick={handleCancelAppointment}>Отменить запись</Button>
-        </>
-      }>
+      <Modal
+        open={!!cancelTarget}
+        onClose={() => {
+          setCancelTarget(null);
+          setCancelReason('');
+        }}
+        title="Отменить запись?"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setCancelTarget(null);
+                setCancelReason('');
+              }}
+            >
+              Не отменять
+            </Button>
+            <Button onClick={handleCancelAppointment} disabled={!cancelReason.trim()}>
+              Отменить запись
+            </Button>
+          </>
+        }
+      >
         {cancelTarget && (
           <div className="space-y-4">
             <p className="text-admin-text">
-              Запись клиента <strong>{cancelTarget.client_name || 'Гость'}</strong> на <strong>{cancelTarget.service_name}</strong> будет отменена.
+              Запись клиента <strong>{cancelTarget.client_name || 'Гость'}</strong> на{' '}
+              <strong>{cancelTarget.service_name}</strong> будет отменена.
             </p>
             <p className="text-sm text-admin-textMuted">
-              Клиент получит уведомление об отмене в Telegram или MAX.
+              {new Date(cancelTarget.appointment_time).toLocaleString('ru-RU', {
+                day: 'numeric',
+                month: 'long',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </p>
+            <Textarea
+              label="Причина отмены"
+              required
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Например: мастер заболел, переносим на другой день..."
+              rows={3}
+            />
+            <p className="text-xs text-admin-textMuted">
+              Клиент получит это сообщение в {cancelTarget.client_messenger === 'telegram' ? 'Telegram' : 'MAX'}.
             </p>
           </div>
         )}

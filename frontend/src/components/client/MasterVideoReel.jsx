@@ -7,6 +7,9 @@ const ACCENT_GLOW = 'rgba(106, 90, 205, 0.45)';
 const MINI_WIDTH = 96;
 const EXPANDED_WIDTH = 280;
 const BOTTOM_NAV_CLEARANCE = '80px';
+const EDGE_OFFSET_RIGHT = '20px';
+const EDGE_OFFSET_BOTTOM_MINI = '96px';
+const EDGE_OFFSET_BOTTOM_DESKTOP = '32px';
 
 export default function MasterVideoReel({ src, title = 'Видеовизитка' }) {
   const videoRef = useRef(null);
@@ -98,7 +101,7 @@ export default function MasterVideoReel({ src, title = 'Видеовизитка
         className={`video-reel-widget${expanded ? ' video-reel-widget--expanded' : ''}`}
         style={{
           position: 'fixed',
-          right: 'max(12px, env(safe-area-inset-right))',
+          right: `max(${EDGE_OFFSET_RIGHT}, env(safe-area-inset-right))`,
           zIndex: expanded ? 55 : 45,
           width: expanded ? undefined : `${MINI_WIDTH}px`,
           transition: 'width 0.4s cubic-bezier(0.34, 1.2, 0.64, 1), filter 0.35s ease',
@@ -192,7 +195,7 @@ export default function MasterVideoReel({ src, title = 'Видеовизитка
 
       <style>{`
         .video-reel-widget {
-          bottom: calc(88px + env(safe-area-inset-bottom));
+          bottom: calc(${EDGE_OFFSET_BOTTOM_MINI} + env(safe-area-inset-bottom));
         }
         .video-reel-widget--expanded {
           bottom: calc(${BOTTOM_NAV_CLEARANCE} + env(safe-area-inset-bottom));
@@ -211,7 +214,7 @@ export default function MasterVideoReel({ src, title = 'Видеовизитка
         }
         @media (min-width: 1024px) {
           .video-reel-widget {
-            bottom: 24px !important;
+            bottom: calc(${EDGE_OFFSET_BOTTOM_DESKTOP} + env(safe-area-inset-bottom)) !important;
           }
           .video-reel-widget--expanded {
             width: min(

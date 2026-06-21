@@ -1,11 +1,6 @@
-# Сборка фронтенда + API в одном контейнере (как задумано в server.js)
-FROM node:18-alpine AS frontend-build
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
+# API-only image. Frontend is NOT baked in — mount ./frontend/dist on the host:
+#   ./frontend/dist:/app/frontend/dist:ro
+# Build UI: cd frontend && npm run build  (or deploy/sync-live.sh)
 FROM node:18-alpine
 WORKDIR /app
 
@@ -13,9 +8,7 @@ COPY backend/package*.json ./
 RUN npm install --omit=dev
 
 COPY backend/ ./
-COPY --from=frontend-build /app/frontend/dist ./frontend/dist
-
-RUN mkdir -p /app/uploads
+RUN mkdir -p /app/frontend/dist /app/uploads
 
 EXPOSE 3000
 CMD ["node", "src/server.js"]

@@ -1,5 +1,5 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -19,6 +19,14 @@ const {
   getPriceGroupsForSalon
 } = require('../utils/salonMasters');
 const { resolveTeamMasterId } = require('../utils/teamContext');
+const { getAvailableSlots } = require('../utils/bookingSlots');
+const { masterAuthMiddleware: authMiddleware, requireOwner } = require('../utils/masterAuth');
+const {
+  getOverviewStats,
+  fetchTeamRevenueRows,
+  buildTeamRevenueCsv,
+  buildOwnerRevenueXlsx
+} = require('../utils/revenueReport');
 const { buildStats } = require('../utils/clientStats');
 const { formatClientDisplayName } = require('../utils/clientDisplay');
 const { formatMasterPublicTitle } = require('../utils/masterDisplay');
@@ -50,6 +58,7 @@ const {
   DEFAULT_MESSAGE
 } = require('../utils/repeatInvite');
 const { queryWithColumnFallback } = require('../utils/safeQuery');
+const { buildClientContactInfo, buildClientPhoneFields, buildClientChannelFields } = require('../utils/clientContact');
 const {
   getMasterBillingRow,
   formatBillingState,
@@ -71,22 +80,7 @@ function buildClientWebUrl(masterId, channel, userId, tab = 'booking') {
   return `${base}/m/${encodeMasterId(masterId)}?${params.toString()}`;
 }
 
-// Middleware для проверки авторизации
-const authMiddleware = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Не авторизован' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-    req.masterId = decoded.masterId;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Неверный токен' });
-  }
-};
+// Middleware для проверки авторизации (владелец или мастер команды)
 
 // Настройка multer для загрузки файлов
 const storage = multer.diskStorage({
@@ -111,25 +105,66 @@ const uploadVideoReel = multer({
 });
 
 // --- Мастера салона (исполнители) ---
-router.get('/me/salon-masters', authMiddleware, async (req, res) => {
+router.get('/me/salon-masters', authMiddleware, requireOwner, async (req, res) => {
   try {
     const rows = await listSalonMasters(req.masterId);
-    res.json(rows);
+    res.json(
+      rows.map(({ password_hash, ...row }) => ({
+        ...row,
+        has_login: Boolean(row.email && password_hash)
+      }))
+    );
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при получении мастеров' });
   }
 });
 
-router.post('/me/salon-masters', authMiddleware, async (req, res) => {
+router.post('/me/salon-masters', authMiddleware, requireOwner, async (req, res) => {
   try {
-    const { name, specialty, description, slot_step_minutes, sort_order, is_active, photo_url } = req.body;
+    const {
+      name,
+      specialty,
+      description,
+      slot_step_minutes,
+      sort_order,
+      is_active,
+      photo_url,
+      email,
+      password,
+      commission_percent
+    } = req.body;
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Укажите имя мастера' });
     }
+    if (!email?.trim()) {
+      return res.status(400).json({ error: 'Укажите email для входа мастера' });
+    }
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ error: 'Пароль для мастера — минимум 6 символов' });
+    }
+
+    const emailNorm = email.trim().toLowerCase();
+    const dupOwner = await db.query('SELECT id FROM masters WHERE LOWER(email) = $1', [emailNorm]);
+    if (dupOwner.rows.length > 0) {
+      return res.status(400).json({ error: 'Этот email уже занят' });
+    }
+    const dupTeam = await db.query(
+      `SELECT id FROM salon_masters WHERE LOWER(email) = $1`,
+      [emailNorm]
+    );
+    if (dupTeam.rows.length > 0) {
+      return res.status(400).json({ error: 'Этот email уже используется другим мастером' });
+    }
+
+    const password_hash = await bcrypt.hash(String(password), 10);
+    const pct = Math.min(100, Math.max(0, Number(commission_percent) || 0));
     const id = uuidv4();
     await db.query(
-      `INSERT INTO salon_masters (id, salon_id, name, specialty, description, photo_url, slot_step_minutes, sort_order, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO salon_masters (
+         id, salon_id, name, specialty, description, photo_url, slot_step_minutes, sort_order, is_active,
+         email, password_hash, commission_percent
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         id,
         req.masterId,
@@ -139,7 +174,10 @@ router.post('/me/salon-masters', authMiddleware, async (req, res) => {
         photo_url || null,
         slot_step_minutes || 60,
         sort_order ?? 0,
-        is_active !== false
+        is_active !== false,
+        emailNorm,
+        password_hash,
+        pct
       ]
     );
     res.status(201).json({ id });
@@ -149,12 +187,52 @@ router.post('/me/salon-masters', authMiddleware, async (req, res) => {
   }
 });
 
-router.put('/me/salon-masters/:id', authMiddleware, async (req, res) => {
+router.put('/me/salon-masters/:id', authMiddleware, requireOwner, async (req, res) => {
   try {
     const row = await getSalonMasterById(req.params.id, req.masterId);
     if (!row) return res.status(404).json({ error: 'Мастер не найден' });
 
-    const { name, specialty, description, slot_step_minutes, sort_order, is_active, photo_url } = req.body;
+    const {
+      name,
+      specialty,
+      description,
+      slot_step_minutes,
+      sort_order,
+      is_active,
+      photo_url,
+      email,
+      password,
+      commission_percent
+    } = req.body;
+
+    let password_hash = row.password_hash;
+    if (password && String(password).length >= 6) {
+      password_hash = await bcrypt.hash(String(password), 10);
+    }
+
+    let emailNorm = row.email;
+    if (email !== undefined) {
+      emailNorm = email?.trim()?.toLowerCase() || null;
+      if (emailNorm) {
+        const dupOwner = await db.query('SELECT id FROM masters WHERE LOWER(email) = $1', [emailNorm]);
+        if (dupOwner.rows.length > 0) {
+          return res.status(400).json({ error: 'Этот email уже занят' });
+        }
+        const dupTeam = await db.query(
+          `SELECT id FROM salon_masters WHERE LOWER(email) = $1 AND id != $2`,
+          [emailNorm, req.params.id]
+        );
+        if (dupTeam.rows.length > 0) {
+          return res.status(400).json({ error: 'Этот email уже используется другим мастером' });
+        }
+      }
+    }
+
+    const pct =
+      commission_percent !== undefined
+        ? Math.min(100, Math.max(0, Number(commission_percent) || 0))
+        : row.commission_percent;
+
     await db.query(
       `UPDATE salon_masters SET
         name = COALESCE($1, name),
@@ -163,9 +241,25 @@ router.put('/me/salon-masters/:id', authMiddleware, async (req, res) => {
         photo_url = COALESCE($4, photo_url),
         slot_step_minutes = COALESCE($5, slot_step_minutes),
         sort_order = COALESCE($6, sort_order),
-        is_active = COALESCE($7, is_active)
-       WHERE id = $8 AND salon_id = $9`,
-      [name, specialty, description, photo_url, slot_step_minutes, sort_order, is_active, req.params.id, req.masterId]
+        is_active = COALESCE($7, is_active),
+        email = COALESCE($8, email),
+        password_hash = COALESCE($9, password_hash),
+        commission_percent = COALESCE($10, commission_percent)
+       WHERE id = $11 AND salon_id = $12`,
+      [
+        name,
+        specialty,
+        description,
+        photo_url,
+        slot_step_minutes,
+        sort_order,
+        is_active,
+        emailNorm,
+        password_hash,
+        pct,
+        req.params.id,
+        req.masterId
+      ]
     );
     res.json({ success: true });
   } catch (error) {
@@ -350,7 +444,7 @@ router.get('/:masterId', async (req, res) => {
 });
 
 // Получить свои данные (авторизованный мастер)
-router.get('/me/profile', authMiddleware, async (req, res) => {
+router.get('/me/profile', authMiddleware, requireOwner, async (req, res) => {
   try {
     const result = await queryWithColumnFallback(
       db,
@@ -379,11 +473,11 @@ router.get('/me/profile', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/me/client-themes', authMiddleware, (_req, res) => {
+router.get('/me/client-themes', authMiddleware, requireOwner, (_req, res) => {
   res.json({ themes: listClientThemesCatalog(), defaultTheme: DEFAULT_CLIENT_THEME });
 });
 
-router.put('/me/client-theme', authMiddleware, async (req, res) => {
+router.put('/me/client-theme', authMiddleware, requireOwner, async (req, res) => {
   try {
     const theme = normalizeClientTheme(req.body?.client_theme);
     await db.query(
@@ -426,7 +520,7 @@ router.post('/me/geocode', authMiddleware, async (req, res) => {
 });
 
 // Обновить профиль мастера
-router.put('/me/profile', authMiddleware, async (req, res) => {
+router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
   try {
     let { name, last_name, salon_name, description, phone, address, latitude, longitude, yandex_maps_link } = req.body;
 
@@ -575,7 +669,7 @@ router.delete('/me/video-reel', authMiddleware, async (req, res) => {
 // Получить расписание работы
 router.get('/me/schedule', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     const result = await db.query(
       'SELECT * FROM work_schedule WHERE salon_master_id = $1 ORDER BY day_of_week',
       [salonMasterId]
@@ -591,21 +685,40 @@ router.get('/me/schedule', authMiddleware, async (req, res) => {
 router.post('/me/schedule', authMiddleware, async (req, res) => {
   try {
     const { schedule, salonMasterId: bodySalonMasterId } = req.body;
-    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
 
     if (!salonMasterId) {
       return res.status(400).json({ error: 'Мастер салона не найден. Обратитесь в поддержку.' });
     }
 
-    // Delete by master_id since unique constraint is on (master_id, day_of_week)
-    await db.query('DELETE FROM work_schedule WHERE master_id = $1', [req.masterId]);
+    if (!Array.isArray(schedule) || schedule.length === 0) {
+      return res.status(400).json({ error: 'Укажите расписание' });
+    }
 
-    for (const day of schedule) {
-      await db.query(
-        `INSERT INTO work_schedule (id, master_id, salon_master_id, day_of_week, start_time, end_time, is_day_off)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [uuidv4(), req.masterId, salonMasterId, day.day_of_week, day.start_time, day.end_time, day.is_day_off || false]
-      );
+    await db.query('BEGIN');
+    try {
+      await db.query('DELETE FROM work_schedule WHERE salon_master_id = $1', [salonMasterId]);
+
+      for (const day of schedule) {
+        await db.query(
+          `INSERT INTO work_schedule (id, master_id, salon_master_id, day_of_week, start_time, end_time, is_day_off)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            uuidv4(),
+            req.masterId,
+            salonMasterId,
+            day.day_of_week,
+            day.start_time,
+            day.end_time,
+            day.is_day_off || false
+          ]
+        );
+      }
+
+      await db.query('COMMIT');
+    } catch (txError) {
+      await db.query('ROLLBACK');
+      throw txError;
     }
 
     res.json({ success: true });
@@ -616,10 +729,36 @@ router.post('/me/schedule', authMiddleware, async (req, res) => {
   }
 });
 
+// Свободные слоты для ручной записи (та же логика, что у клиента)
+router.get('/me/slots', authMiddleware, async (req, res) => {
+  try {
+    const { date, salonMasterId: querySalonMasterId, durationMinutes, excludeAppointmentId } = req.query;
+    const salonMasterId = await resolveTeamMasterId(
+      req.masterId,
+      querySalonMasterId,
+      req.salonMasterId
+    );
+
+    const slots = await getAvailableSlots(db, {
+      salonId: req.masterId,
+      salonMasterId,
+      date,
+      durationMinutes,
+      excludeAppointmentId: excludeAppointmentId || null
+    });
+
+    res.json(slots);
+  } catch (error) {
+    console.error('Error fetching master slots:', error);
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка при получении слотов' });
+  }
+});
+
 // Получить исключения в расписании
 router.get('/me/exceptions', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     const result = await db.query(
       'SELECT * FROM schedule_exceptions WHERE salon_master_id = $1 ORDER BY exception_date',
       [salonMasterId]
@@ -636,7 +775,7 @@ router.post('/me/exceptions', authMiddleware, async (req, res) => {
   try {
     const { exception_date, is_working, start_time, end_time, salonMasterId: bodySalonMasterId } = req.body;
     console.log('[exception save] bodySalonMasterId:', bodySalonMasterId);
-    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
     console.log('[exception save] resolved salonMasterId:', salonMasterId, 'exception_date:', exception_date, 'is_working:', is_working);
 
     await upsertScheduleException(db, {
@@ -666,7 +805,7 @@ router.post('/me/exceptions/bulk', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Слишком много дат за один раз' });
     }
 
-    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
     const normalized = [...new Set(dates.map((d) => String(d).slice(0, 10)))].filter((d) =>
       /^\d{4}-\d{2}-\d{2}$/.test(d)
     );
@@ -702,7 +841,7 @@ router.post('/me/exceptions/bulk', authMiddleware, async (req, res) => {
 // Удалить исключение
 router.delete('/me/exceptions/:id', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     await db.query(
       'DELETE FROM schedule_exceptions WHERE id = $1 AND salon_master_id = $2',
       [req.params.id, salonMasterId]
@@ -717,7 +856,7 @@ router.delete('/me/exceptions/:id', authMiddleware, async (req, res) => {
 // Получить прайс-лист
 router.get('/me/prices', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     const result = await db.query(
       'SELECT * FROM price_items WHERE salon_master_id = $1 ORDER BY sort_order',
       [salonMasterId]
@@ -744,7 +883,7 @@ router.post('/me/prices', authMiddleware, async (req, res) => {
       is_active,
       salonMasterId: bodySalonMasterId
     } = req.body;
-    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
 
     const type = ['fixed', 'from', 'to', 'range'].includes(price_type) ? price_type : 'fixed';
     const priceNum = Number(price);
@@ -786,7 +925,7 @@ router.post('/me/prices', authMiddleware, async (req, res) => {
 // Удалить позицию прайс-листа
 router.delete('/me/prices/:id', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     await db.query('DELETE FROM price_items WHERE id = $1 AND salon_master_id = $2', [req.params.id, salonMasterId]);
     res.json({ success: true });
   } catch (error) {
@@ -810,7 +949,7 @@ router.post('/me/prices/upload', authMiddleware, upload.single('image'), async (
 // Получить портфолио
 router.get('/me/portfolio', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     const result = await db.query(
       'SELECT * FROM portfolio WHERE salon_master_id = $1 ORDER BY sort_order',
       [salonMasterId]
@@ -826,7 +965,7 @@ router.get('/me/portfolio', authMiddleware, async (req, res) => {
 router.post('/me/portfolio', authMiddleware, upload.single('media'), async (req, res) => {
   try {
     const { title, sort_order, salonMasterId: bodySalonMasterId, media_type, video_url } = req.body;
-    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
     const existingVideos = await db.query(
       `SELECT COUNT(*)::int AS count FROM portfolio
        WHERE master_id = $1
@@ -868,7 +1007,7 @@ router.post('/me/portfolio', authMiddleware, upload.single('media'), async (req,
 // Удалить фото из портфолио
 router.delete('/me/portfolio/:id', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId);
+    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     await db.query('DELETE FROM portfolio WHERE id = $1 AND salon_master_id = $2', [req.params.id, salonMasterId]);
     res.json({ success: true });
   } catch (error) {
@@ -880,6 +1019,17 @@ router.delete('/me/portfolio/:id', authMiddleware, async (req, res) => {
 // Получить всех клиентов салона (с краткой статистикой)
 router.get('/me/clients', authMiddleware, async (req, res) => {
   try {
+    const teamFilter = req.isTeamMember && req.salonMasterId
+      ? `AND EXISTS (
+           SELECT 1 FROM appointments ax
+           WHERE ax.client_id = c.id AND ax.master_id = $1 AND ax.salon_master_id = $2
+         )`
+      : '';
+    const params = req.isTeamMember && req.salonMasterId ? [req.masterId, req.salonMasterId] : [req.masterId];
+    const apptTeamJoin = req.isTeamMember && req.salonMasterId
+      ? ' AND a.salon_master_id = $2'
+      : '';
+
     const result = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.phone AS client_phone, c.messenger, c.max_user_id, c.telegram_user_id, c.created_at,
               scp.first_name, scp.last_name, scp.patronymic, scp.phone AS profile_phone, scp.notes,
@@ -889,13 +1039,14 @@ router.get('/me/clients', authMiddleware, async (req, res) => {
               COALESCE(SUM(a.service_price) FILTER (WHERE a.status IN ('confirmed', 'completed')), 0)::numeric AS total_spent
        FROM clients c
        LEFT JOIN salon_client_profiles scp ON scp.client_id = c.id AND scp.salon_id = $1
-       LEFT JOIN appointments a ON a.client_id = c.id AND a.master_id = $1
+       LEFT JOIN appointments a ON a.client_id = c.id AND a.master_id = $1${apptTeamJoin}
        WHERE (scp.salon_id = $1 OR a.id IS NOT NULL)
          AND COALESCE(scp.deleted_at, 'epoch'::timestamp) = 'epoch'::timestamp
+         ${teamFilter}
        GROUP BY c.id, c.name, c.photo_url, c.phone, c.messenger, c.max_user_id, c.telegram_user_id, c.created_at,
                 scp.first_name, scp.last_name, scp.patronymic, scp.phone, scp.notes
        ORDER BY last_visit DESC NULLS LAST, c.created_at DESC, c.name`,
-      [req.masterId]
+      params
     );
     const rows = result.rows.map((row) => ({
       ...row,
@@ -905,7 +1056,8 @@ router.get('/me/clients', authMiddleware, async (req, res) => {
         patronymic: row.patronymic,
         name: row.name
       }),
-      phone: row.profile_phone || row.client_phone
+      ...buildClientPhoneFields(row),
+      ...buildClientChannelFields(row)
     }));
     res.json(rows);
   } catch (error) {
@@ -922,7 +1074,8 @@ router.get('/me/clients/:clientId', authMiddleware, async (req, res) => {
     const client = await db.query(
       `SELECT c.*,
               scp.first_name, scp.last_name, scp.patronymic,
-              scp.phone AS profile_phone, scp.notes AS salon_notes
+              scp.phone AS profile_phone, scp.notes AS salon_notes,
+              scp.note_1, scp.note_2, scp.note_3
        FROM clients c
        LEFT JOIN salon_client_profiles scp ON scp.client_id = c.id AND scp.salon_id = $2
        WHERE c.id = $1`,
@@ -963,16 +1116,27 @@ router.get('/me/clients/:clientId', authMiddleware, async (req, res) => {
       patronymic: row.patronymic,
       name: row.name
     });
+    const contact = await buildClientContactInfo(row, { withTelegramUrl: true });
+    const stats = buildStats(history.rows);
+    const now = new Date();
+    const activeAppointments = history.rows.filter(
+      (a) => a.status === 'confirmed' && new Date(a.appointment_time) >= now
+    );
 
     res.json({
       client: {
         ...row,
         display_name: displayName,
-        phone: row.profile_phone || row.phone,
-        can_message: !!(row.max_user_id || row.telegram_user_id)
+        phone: contact.phone,
+        salon_notes: row.salon_notes,
+        note_1: row.note_1 || row.salon_notes || null,
+        note_2: row.note_2 || null,
+        note_3: row.note_3 || null,
+        ...contact
       },
-      stats: buildStats(history.rows),
-      appointments: history.rows
+      stats,
+      appointments: history.rows.slice(0, 3),
+      active_appointments: activeAppointments
     });
   } catch (error) {
     console.error(error);
@@ -984,7 +1148,7 @@ router.get('/me/clients/:clientId', authMiddleware, async (req, res) => {
 router.put('/me/clients/:clientId', authMiddleware, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { notes, first_name, last_name, patronymic, phone } = req.body;
+    const { notes, note_1, note_2, note_3, first_name, last_name, patronymic, phone } = req.body;
 
     const hasAccess = await db.query(
       `SELECT 1 FROM salon_client_profiles
@@ -1010,19 +1174,26 @@ router.put('/me/clients/:clientId', authMiddleware, async (req, res) => {
       name: null
     });
 
+    const n1 = note_1 !== undefined ? (note_1?.trim() || null) : (notes?.trim() || null);
+    const n2 = note_2 !== undefined ? (note_2?.trim() || null) : null;
+    const n3 = note_3 !== undefined ? (note_3?.trim() || null) : null;
+
     await db.query(
-      `INSERT INTO salon_client_profiles (salon_id, client_id, first_name, last_name, patronymic, phone, notes, deleted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NOW())
+      `INSERT INTO salon_client_profiles (salon_id, client_id, first_name, last_name, patronymic, phone, notes, note_1, note_2, note_3, deleted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NOW())
        ON CONFLICT (salon_id, client_id)
        DO UPDATE SET
-         first_name = $3,
-         last_name = $4,
-         patronymic = $5,
-         phone = $6,
-         notes = $7,
+         first_name = COALESCE($3, salon_client_profiles.first_name),
+         last_name = COALESCE($4, salon_client_profiles.last_name),
+         patronymic = COALESCE($5, salon_client_profiles.patronymic),
+         phone = COALESCE($6, salon_client_profiles.phone),
+         notes = COALESCE($7, salon_client_profiles.notes),
+         note_1 = COALESCE($8, salon_client_profiles.note_1),
+         note_2 = COALESCE($9, salon_client_profiles.note_2),
+         note_3 = COALESCE($10, salon_client_profiles.note_3),
          deleted_at = NULL,
          updated_at = NOW()`,
-      [req.masterId, clientId, fName, lName, patr, phoneVal, notes ?? null]
+      [req.masterId, clientId, fName, lName, patr, phoneVal, n1, n1, n2, n3]
     );
 
     if (displayName !== 'Без имени' || phoneVal) {
@@ -1081,10 +1252,13 @@ router.delete('/me/clients/:clientId', authMiddleware, async (req, res) => {
 router.post('/me/clients/:clientId/message', authMiddleware, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { message } = req.body;
+    const { message, channel } = req.body;
 
     if (!message?.trim()) {
       return res.status(400).json({ error: 'Введите текст сообщения' });
+    }
+    if (channel && !['telegram', 'max', 'all'].includes(channel)) {
+      return res.status(400).json({ error: 'Неверный канал сообщения' });
     }
 
     const hasAccess = await db.query(
@@ -1106,7 +1280,7 @@ router.post('/me/clients/:clientId/message', authMiddleware, async (req, res) =>
 
     const c = client.rows[0];
     const notifyText = `💬 Сообщение от салона:\n\n${message.trim()}`;
-    const notifyOpts = {};
+    const notifyOpts = { channel: channel || 'all' };
     if (c.telegram_user_id) {
       notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'telegram', c.telegram_user_id, 'chat');
       notifyOpts.replyText = 'Ответить мастеру';
@@ -1116,7 +1290,11 @@ router.post('/me/clients/:clientId/message', authMiddleware, async (req, res) =>
     }
     const sent = await sendMessengerNotification(c, notifyText, notifyOpts);
     if (!sent) {
-      return res.status(400).json({ error: 'У клиента нет ID мессенджера' });
+      const err =
+        channel === 'telegram' ? 'У клиента нет Telegram' :
+        channel === 'max' ? 'У клиента нет MAX' :
+        'У клиента нет ID мессенджера';
+      return res.status(400).json({ error: err });
     }
 
     res.json({ success: true });
@@ -1127,7 +1305,7 @@ router.post('/me/clients/:clientId/message', authMiddleware, async (req, res) =>
 });
 
 // Рассылка клиентам
-router.post('/me/broadcast', authMiddleware, async (req, res) => {
+router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
   try {
     const { message, client_ids } = req.body;
 
@@ -1412,17 +1590,79 @@ router.post('/me/clients/:clientId/repeat-invite', authMiddleware, async (req, r
       bookingLink: buildBookingLink(req.masterId)
     });
 
-    const sent = await sendMessengerNotification(c, msg);
+    const sent = await sendMessengerNotification(c, msg, { channel: 'all' });
     if (!sent) return res.status(400).json({ error: 'У клиента нет мессенджера' });
 
-    res.json({ success: true });
+    const channels = [];
+    if (c.telegram_user_id) channels.push('telegram');
+    if (c.max_user_id) channels.push('max');
+
+    res.json({ success: true, channels });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при отправке приглашения' });
   }
 });
 
+// Сводка на главной + выгрузка выручки
+router.get('/me/overview-stats', authMiddleware, async (req, res) => {
+  try {
+    let commission = 0;
+    if (req.isTeamMember && req.salonMasterId) {
+      const row = await getSalonMasterById(req.salonMasterId, req.masterId);
+      commission = Number(row?.commission_percent || 0);
+    }
+    const stats = await getOverviewStats({
+      salonId: req.masterId,
+      salonMasterId: req.isTeamMember ? req.salonMasterId : null,
+      commissionPercent: commission
+    });
+    res.json(stats);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при получении статистики' });
+  }
+});
+
+router.get('/me/revenue-export', authMiddleware, async (req, res) => {
+  try {
+    const month = req.query.month === 'all' ? null : req.query.month || null;
+    const periodSlug = month || 'vse-vremya';
+
+    if (req.isTeamMember) {
+      let commission = 0;
+      if (req.salonMasterId) {
+        const row = await getSalonMasterById(req.salonMasterId, req.masterId);
+        commission = Number(row?.commission_percent || 0);
+      }
+      const rows = await fetchTeamRevenueRows({
+        salonId: req.masterId,
+        salonMasterId: req.salonMasterId,
+        commissionPercent: commission,
+        month
+      });
+      const csv = buildTeamRevenueCsv(rows);
+      const filename = `vyruchka-${periodSlug}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(csv);
+    }
+
+    const xlsx = await buildOwnerRevenueXlsx({ salonId: req.masterId, month });
+    const filename = `vyruchka-${periodSlug}.xlsx`;
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(Buffer.from(xlsx));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при выгрузке' });
+  }
+});
+
 // Аналитика салона
-router.get('/me/analytics', authMiddleware, async (req, res) => {
+router.get('/me/analytics', authMiddleware, requireOwner, async (req, res) => {
   try {
     const days = Math.min(90, Math.max(7, parseInt(req.query.days, 10) || 30));
     const since = daysAgo(days);
@@ -1437,8 +1677,9 @@ router.get('/me/analytics', authMiddleware, async (req, res) => {
     );
 
     const rows = appointments.rows;
-    const active = rows.filter((r) => r.status !== 'cancelled');
-    const revenue = active.reduce((s, r) => s + Number(r.service_price || 0), 0);
+    const active = rows.filter((r) => r.status === 'confirmed' || r.status === 'completed');
+    const completed = rows.filter((r) => r.status === 'completed');
+    const revenue = completed.reduce((s, r) => s + Number(r.service_price || 0), 0);
 
     const clientIds = new Set(active.map((r) => r.client_id).filter(Boolean));
     const newClients = await db.query(
@@ -1453,6 +1694,11 @@ router.get('/me/analytics', authMiddleware, async (req, res) => {
     active.forEach((r) => {
       serviceMap[r.service_name] = serviceMap[r.service_name] || { count: 0, revenue: 0 };
       serviceMap[r.service_name].count += 1;
+    });
+    completed.forEach((r) => {
+      if (!serviceMap[r.service_name]) {
+        serviceMap[r.service_name] = { count: 0, revenue: 0 };
+      }
       serviceMap[r.service_name].revenue += Number(r.service_price || 0);
     });
     const topServices = Object.entries(serviceMap)
@@ -1465,13 +1711,19 @@ router.get('/me/analytics', authMiddleware, async (req, res) => {
       const key = r.salon_master_name || 'Без мастера';
       masterMap[key] = masterMap[key] || { appointments: 0, revenue: 0 };
       masterMap[key].appointments += 1;
+    });
+    completed.forEach((r) => {
+      const key = r.salon_master_name || 'Без мастера';
+      if (!masterMap[key]) {
+        masterMap[key] = { appointments: 0, revenue: 0 };
+      }
       masterMap[key].revenue += Number(r.service_price || 0);
     });
     const byMaster = Object.entries(masterMap)
       .map(([name, v]) => ({ name, ...v }))
       .sort((a, b) => b.revenue - a.revenue);
 
-    const cancelled = rows.filter((r) => r.status === 'cancelled').length;
+    const cancelled = rows.filter((r) => r.status === 'cancelled' || r.status === 'no_show').length;
 
     res.json({
       period_days: days,
@@ -1517,7 +1769,7 @@ router.get('/me/link', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/me/billing', authMiddleware, async (req, res) => {
+router.get('/me/billing', authMiddleware, requireOwner, async (req, res) => {
   try {
     const row = await getMasterBillingRow(req.masterId);
     if (!row) return res.status(404).json({ error: 'Мастер не найден' });
@@ -1536,7 +1788,7 @@ router.get('/me/billing', authMiddleware, async (req, res) => {
   }
 });
 
-router.post('/me/billing/topup', authMiddleware, async (req, res) => {
+router.post('/me/billing/topup', authMiddleware, requireOwner, async (req, res) => {
   try {
     if (!isBillingEnabled()) {
       return res.status(403).json({ error: 'Оплата пока недоступна — сервис бесплатный' });
@@ -1552,7 +1804,7 @@ router.post('/me/billing/topup', authMiddleware, async (req, res) => {
 
     const payment = await createPayment({
       amount,
-      description: `Пополнение баланса Wonder.ru (${amount} ₽)`,
+      description: `Пополнение баланса woner.ru (${amount} ₽)`,
       metadata: { master_id: req.masterId, purpose: 'topup' }
     });
 
@@ -1572,7 +1824,7 @@ router.post('/me/billing/topup', authMiddleware, async (req, res) => {
   }
 });
 
-router.post('/me/billing/unlimited', authMiddleware, async (req, res) => {
+router.post('/me/billing/unlimited', authMiddleware, requireOwner, async (req, res) => {
   try {
     if (!isBillingEnabled()) {
       return res.status(403).json({ error: 'Оплата пока недоступна — сервис бесплатный' });
@@ -1583,7 +1835,7 @@ router.post('/me/billing/unlimited', authMiddleware, async (req, res) => {
 
     const payment = await createPayment({
       amount: UNLIMITED_PRICE,
-      description: `Тариф «Безлимит» Wonder.ru (${UNLIMITED_PRICE} ₽ / 30 дней)`,
+      description: `Тариф «Безлимит» woner.ru (${UNLIMITED_PRICE} ₽ / 30 дней)`,
       metadata: { master_id: req.masterId, purpose: 'unlimited' }
     });
 
@@ -1603,7 +1855,7 @@ router.post('/me/billing/unlimited', authMiddleware, async (req, res) => {
   }
 });
 
-router.put('/me/billing/auto-renew', authMiddleware, async (req, res) => {
+router.put('/me/billing/auto-renew', authMiddleware, requireOwner, async (req, res) => {
   try {
     if (!isBillingEnabled()) {
       return res.status(403).json({ error: 'Оплата пока недоступна' });
@@ -1618,13 +1870,19 @@ router.put('/me/billing/auto-renew', authMiddleware, async (req, res) => {
 // Черный список
 router.get('/me/blacklist', authMiddleware, async (req, res) => {
   try {
+    const params = [req.masterId];
+    let scopeSql = '';
+    if (req.isTeamMember && req.salonMasterId) {
+      params.push(req.salonMasterId);
+      scopeSql = ` AND b.salon_master_id = $${params.length}`;
+    }
     const result = await db.query(
       `SELECT b.*, c.name as client_name, c.phone as client_phone, c.messenger, c.max_user_id, c.telegram_user_id
        FROM blacklist b
        LEFT JOIN clients c ON b.client_id = c.id
-       WHERE b.master_id = $1
+       WHERE b.master_id = $1${scopeSql}
        ORDER BY b.created_at DESC`,
-      [req.masterId]
+      params
     );
     res.json(result.rows);
   } catch (error) {
@@ -1639,14 +1897,14 @@ router.post('/me/blacklist', authMiddleware, async (req, res) => {
     if (!reason || !reason.trim()) {
       return res.status(400).json({ error: 'Укажите причину добавления в чёрный список' });
     }
+    const salonMasterId = req.isTeamMember ? req.salonMasterId : req.body.salon_master_id || null;
     const result = await db.query(
-      `INSERT INTO blacklist (master_id, client_id, phone, name, reason)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (master_id, client_id) DO UPDATE SET reason = $5, phone = COALESCE($3, blacklist.phone), name = COALESCE($4, blacklist.name)
+      `INSERT INTO blacklist (master_id, salon_master_id, client_id, phone, name, reason)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [req.masterId, client_id || null, phone || null, name || null, reason.trim()]
+      [req.masterId, salonMasterId, client_id || null, phone || null, name || null, reason.trim()]
     );
-    res.json(result.rows[0]);
+    res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Ошибка при добавлении в чёрный список' });
@@ -1655,7 +1913,13 @@ router.post('/me/blacklist', authMiddleware, async (req, res) => {
 
 router.delete('/me/blacklist/:id', authMiddleware, async (req, res) => {
   try {
-    await db.query('DELETE FROM blacklist WHERE id = $1 AND master_id = $2', [req.params.id, req.masterId]);
+    const params = [req.params.id, req.masterId];
+    let scopeSql = '';
+    if (req.isTeamMember && req.salonMasterId) {
+      params.push(req.salonMasterId);
+      scopeSql = ` AND salon_master_id = $${params.length}`;
+    }
+    await db.query(`DELETE FROM blacklist WHERE id = $1 AND master_id = $2${scopeSql}`, params);
     res.json({ success: true });
   } catch (error) {
     console.error(error);
@@ -1663,81 +1927,21 @@ router.delete('/me/blacklist/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Проверка, в чёрном ли списке
 router.get('/me/blacklist/check', authMiddleware, async (req, res) => {
   try {
     const { client_id, phone } = req.query;
     if (!client_id && !phone) return res.json({ blocked: false });
     let result;
     if (client_id) {
-      result = await db.query('SELECT 1 FROM blacklist WHERE master_id = $1 AND client_id = $2 LIMIT 1', [req.masterId, client_id]);
+      result = await db.query(
+        'SELECT 1 FROM blacklist WHERE master_id = $1 AND client_id = $2 LIMIT 1',
+        [req.masterId, client_id]
+      );
     } else {
-      result = await db.query('SELECT 1 FROM blacklist WHERE master_id = $1 AND phone = $2 LIMIT 1', [req.masterId, phone]);
-    }
-    res.json({ blocked: result.rows.length > 0 });
-  } catch (error) {
-    res.status(500).json({ error: 'Ошибка проверки' });
-  }
-});
-
-// Черный список
-router.get('/me/blacklist', authMiddleware, async (req, res) => {
-  try {
-    const result = await db.query(
-      `SELECT b.*, c.name as client_name, c.phone as client_phone, c.messenger, c.max_user_id, c.telegram_user_id
-       FROM blacklist b
-       LEFT JOIN clients c ON b.client_id = c.id
-       WHERE b.master_id = $1
-       ORDER BY b.created_at DESC`,
-      [req.masterId]
-    );
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Ошибка при получении чёрного списка' });
-  }
-});
-
-router.post('/me/blacklist', authMiddleware, async (req, res) => {
-  try {
-    const { client_id, phone, name, reason } = req.body;
-    if (!reason || !reason.trim()) {
-      return res.status(400).json({ error: 'Укажите причину добавления в чёрный список' });
-    }
-    const result = await db.query(
-      `INSERT INTO blacklist (master_id, client_id, phone, name, reason)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (master_id, client_id) DO UPDATE SET reason = $5, phone = COALESCE($3, blacklist.phone), name = COALESCE($4, blacklist.name)
-       RETURNING *`,
-      [req.masterId, client_id || null, phone || null, name || null, reason.trim()]
-    );
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Ошибка при добавлении в чёрный список' });
-  }
-});
-
-router.delete('/me/blacklist/:id', authMiddleware, async (req, res) => {
-  try {
-    await db.query('DELETE FROM blacklist WHERE id = $1 AND master_id = $2', [req.params.id, req.masterId]);
-    res.json({ success: true });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Ошибка при удалении из чёрного списка' });
-  }
-});
-
-// Проверка, в чёрном ли списке
-router.get('/me/blacklist/check', authMiddleware, async (req, res) => {
-  try {
-    const { client_id, phone } = req.query;
-    if (!client_id && !phone) return res.json({ blocked: false });
-    let result;
-    if (client_id) {
-      result = await db.query('SELECT 1 FROM blacklist WHERE master_id = $1 AND client_id = $2 LIMIT 1', [req.masterId, client_id]);
-    } else {
-      result = await db.query('SELECT 1 FROM blacklist WHERE master_id = $1 AND phone = $2 LIMIT 1', [req.masterId, phone]);
+      result = await db.query(
+        'SELECT 1 FROM blacklist WHERE master_id = $1 AND phone = $2 LIMIT 1',
+        [req.masterId, phone]
+      );
     }
     res.json({ blocked: result.rows.length > 0 });
   } catch (error) {

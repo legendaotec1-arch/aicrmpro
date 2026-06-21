@@ -1,0 +1,1 @@
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255);

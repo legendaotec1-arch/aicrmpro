@@ -61,12 +61,29 @@ const NAV_GROUPS = [
   }
 ];
 
-function NavGroups({ activeSection, navBadges, onSelect, variant = 'mobile' }) {
+const TEAM_NAV_IDS = new Set([
+  'overview',
+  'appointments',
+  'clients',
+  'schedule',
+  'prices',
+  'portfolio',
+  'links',
+  'blacklist'
+]);
+
+function getNavGroups(isTeamMember) {
+  if (!isTeamMember) return NAV_GROUPS;
+  const items = NAV_GROUPS.flatMap((group) => group.items).filter((item) => TEAM_NAV_IDS.has(item.id));
+  return [{ title: 'Кабинет мастера', items }];
+}
+
+function NavGroups({ activeSection, navBadges, onSelect, variant = 'mobile', isTeamMember = false }) {
   const isSidebar = variant === 'sidebar';
 
   return (
     <>
-      {NAV_GROUPS.map((group) => (
+      {getNavGroups(isTeamMember).map((group) => (
         <div key={group.title}>
           <h3
             className={
@@ -127,6 +144,7 @@ export default function DashboardLayout({
   onSectionChange,
   onLogout,
   navBadges = {},
+  isTeamMember = false,
   children
 }) {
   const avatarLetter = (profile?.name?.[0] || 'М').toUpperCase();
@@ -195,6 +213,7 @@ export default function DashboardLayout({
             navBadges={navBadges}
             onSelect={selectSection}
             variant="sidebar"
+            isTeamMember={isTeamMember}
           />
         </nav>
 
@@ -214,7 +233,7 @@ export default function DashboardLayout({
         {/* Mobile header */}
         <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-admin-border safe-top">
           <div className="flex items-center justify-between h-14 px-4">
-            <span className="font-semibold text-admin-text">Wonder.ru</span>
+            <span className="font-semibold text-admin-text">woner.ru</span>
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
@@ -234,7 +253,7 @@ export default function DashboardLayout({
             aria-modal="true"
           >
             <div className="flex items-center justify-between h-14 px-4 border-b border-admin-border shrink-0">
-              <span className="font-semibold text-admin-text">Wonder.ru</span>
+              <span className="font-semibold text-admin-text">woner.ru</span>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
@@ -250,6 +269,7 @@ export default function DashboardLayout({
                 navBadges={navBadges}
                 onSelect={selectSection}
                 variant="mobile"
+                isTeamMember={isTeamMember}
               />
             </nav>
             <div className="p-4 border-t border-admin-border shrink-0">
@@ -277,10 +297,21 @@ export default function DashboardLayout({
           {/* Mobile bottom tab bar */}
           <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-admin-border safe-bottom">
             <div className="flex justify-around items-center h-16 px-1">
-              <TabItem id="overview" label="Главная" Icon={Home} />
-              <TabItem id="appointments" label="Записи" Icon={Calendar} />
-              <TabItem id="clients" label="Клиенты" Icon={Users} />
-              <TabItem id="schedule" label="Расписание" Icon={Clock} />
+              {isTeamMember ? (
+                <>
+                  <TabItem id="overview" label="Главная" Icon={Home} />
+                  <TabItem id="appointments" label="Записи" Icon={Calendar} />
+                  <TabItem id="clients" label="Клиенты" Icon={Users} />
+                  <TabItem id="schedule" label="Расписание" Icon={Clock} />
+                </>
+              ) : (
+                <>
+                  <TabItem id="overview" label="Главная" Icon={Home} />
+                  <TabItem id="appointments" label="Записи" Icon={Calendar} />
+                  <TabItem id="clients" label="Клиенты" Icon={Users} />
+                  <TabItem id="schedule" label="Расписание" Icon={Clock} />
+                </>
+              )}
             </div>
           </nav>
         </div>

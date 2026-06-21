@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Calendar, MessageCircle, RefreshCw } from 'lucide-react';
+import { Calendar, CalendarCheck, Pencil, Phone, Plus, RefreshCw, ShieldOff, Trash2, Wallet, XCircle } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
@@ -8,43 +8,77 @@ import Textarea from '../ui/Textarea';
 import { PageLoader } from '../ui/Spinner';
 import MessengerLabel from '../brand/MessengerLabel';
 import ClientAvatar from './ClientAvatar';
-import { STATUS_LABELS, formatDateTime, formatPrice, formatDate } from '../../lib/format';
-import { copyToClipboard } from '../../lib/clipboard';
+import { STATUS_LABELS, formatDateTime, formatPrice } from '../../lib/format';
+import { formatRuPhoneDisplay, toTelHref } from '../../lib/phoneRu';
 
-function StatBox({ label, value, hint }) {
+function ClientStatsGrid({ stats }) {
+  const items = [
+    {
+      label: 'Визиты',
+      value: stats.total_visits,
+      icon: CalendarCheck,
+      iconWrap: 'bg-admin-accentSoft text-admin-accent'
+    },
+    {
+      label: 'Отмены',
+      value: stats.cancelled_visits,
+      icon: XCircle,
+      iconWrap: 'bg-amber-50 text-amber-600'
+    },
+    {
+      label: 'Ср. чек',
+      value: formatPrice(stats.average_check),
+      icon: Wallet,
+      iconWrap: 'bg-violet-50 text-violet-600'
+    },
+    {
+      label: 'Активные',
+      value: stats.upcoming_visits,
+      icon: Calendar,
+      iconWrap: 'bg-emerald-50 text-emerald-600'
+    }
+  ];
+
   return (
-    <div className="rounded-xl bg-white/90 border border-slate-200/80 px-3 py-2.5 shadow-sm">
-      <p className="text-[11px] font-medium text-ink-muted uppercase tracking-wide">{label}</p>
-      <p className="text-lg font-bold text-ink mt-0.5">{value}</p>
-      {hint && <p className="text-xs text-ink-secondary mt-0.5">{hint}</p>}
+    <div className="grid grid-cols-2 gap-2">
+      {items.map(({ label, value, icon: Icon, iconWrap }) => (
+        <div
+          key={label}
+          className="flex items-center gap-2.5 rounded-xl border border-admin-border/70 bg-white px-3 py-2.5 shadow-sm"
+        >
+          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconWrap}`}>
+            <Icon className="h-4 w-4" strokeWidth={2} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-lg font-bold leading-none tabular-nums text-admin-text">{value}</p>
+            <p className="mt-1 text-[11px] font-medium text-admin-textMuted">{label}</p>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function ContactRow({ label, value, onCopy }) {
-  if (!value) return null;
+function MessengerWriteButton({ channel, onClick }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-xs text-ink-muted">{label}</p>
-        <p className="text-sm font-medium text-ink break-all">{value}</p>
-      </div>
-      {onCopy && (
-        <Button size="sm" variant="ghost" type="button" onClick={onCopy}>
-          Копировать
-        </Button>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl border border-admin-border bg-white px-3 py-2 text-xs font-semibold text-admin-text shadow-sm transition hover:border-admin-accent/40 hover:bg-admin-hover active:scale-[0.98]"
+    >
+      <MessengerLabel channel={channel} showName={false} size="sm" />
+      <span>Написать</span>
+    </button>
   );
 }
 
-const emptyForm = {
-  last_name: '',
-  first_name: '',
-  patronymic: '',
-  phone: '',
-  notes: ''
-};
+function displayClientName(client, form) {
+  const last = form.last_name?.trim() || client?.last_name?.trim();
+  const first = form.first_name?.trim() || client?.first_name?.trim();
+  if (last && first) return `${last} ${first}`;
+  if (last || first) return last || first;
+  return client?.display_name || client?.name || 'Клиент';
+}
 
 export default function ClientDetailModal({
   clientId,
@@ -53,12 +87,26 @@ export default function ClientDetailModal({
   toast,
   onMessage,
   onRepeatInvite,
-  onSaved
+  onSaved,
+  onDelete
 }) {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
   const [data, setData] = useState(null);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState({ last_name: '', first_name: '', phone: '' });
+  const [savedNote, setSavedNote] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteEditing, setNoteEditing] = useState(false);
+  const [showRepeatConfirm, setShowRepeatConfirm] = useState(false);
+  const [repeatSending, setRepeatSending] = useState(false);
+  const [showBlacklistConfirm, setShowBlacklistConfirm] = useState(false);
+  const [blacklistReason, setBlacklistReason] = useState('');
+  const [blacklistSaving, setBlacklistSaving] = useState(false);
+  const [isBlacklisted, setIsBlacklisted] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!clientId) return;
@@ -66,18 +114,23 @@ export default function ClientDetailModal({
     (async () => {
       setLoading(true);
       try {
-        const res = await api.get(`/master/me/clients/${clientId}`);
-        if (!cancelled) {
-          const c = res.data.client;
-          setData(res.data);
-          setForm({
-            last_name: c.last_name || '',
-            first_name: c.first_name || '',
-            patronymic: c.patronymic || '',
-            phone: c.phone || '',
-            notes: c.salon_notes || ''
-          });
-        }
+        const [detailRes, blacklistRes] = await Promise.all([
+          api.get(`/master/me/clients/${clientId}`),
+          api.get('/master/me/blacklist/check', { params: { client_id: clientId } }).catch(() => ({ data: { blocked: false } }))
+        ]);
+        if (cancelled) return;
+        const c = detailRes.data.client;
+        setData(detailRes.data);
+        setForm({
+          last_name: c.last_name || '',
+          first_name: c.first_name || '',
+          phone: c.phone || ''
+        });
+        const initialNote = c.note_1 || c.salon_notes || '';
+        setSavedNote(initialNote);
+        setNoteDraft(initialNote);
+        setNoteEditing(false);
+        setIsBlacklisted(!!blacklistRes.data?.blocked);
       } catch {
         if (!cancelled) toast('Не удалось загрузить карточку', 'error');
       } finally {
@@ -87,147 +140,228 @@ export default function ClientDetailModal({
     return () => { cancelled = true; };
   }, [clientId, api, toast]);
 
-  const handleSave = async () => {
-    setSaving(true);
+  const handleSaveProfile = async () => {
+    setSavingProfile(true);
     try {
       const res = await api.put(`/master/me/clients/${clientId}`, form);
-      toast('Карточка сохранена');
-      if (res.data?.display_name && data?.client) {
+      toast('Сохранено');
+      if (data?.client) {
         setData({
           ...data,
-          client: {
-            ...data.client,
-            display_name: res.data.display_name,
-            ...form
-          }
+          client: { ...data.client, ...form, display_name: res.data.display_name || data.client.display_name }
         });
       }
       onSaved?.();
     } catch {
       toast('Ошибка сохранения', 'error');
     } finally {
-      setSaving(false);
+      setSavingProfile(false);
     }
   };
 
-  const handleCopyId = async (id) => {
+  const handleSaveNote = async () => {
+    const trimmed = noteDraft.trim();
+    if (!trimmed) {
+      toast('Введите текст заметки', 'error');
+      return;
+    }
+    setSavingNote(true);
     try {
-      await copyToClipboard(id);
-      toast('ID скопирован');
+      const payload = { note_1: trimmed };
+      await api.put(`/master/me/clients/${clientId}`, payload);
+      setSavedNote(trimmed);
+      setNoteDraft(trimmed);
+      setNoteEditing(false);
+      toast('Заметка сохранена');
+      if (data?.client) {
+        setData({ ...data, client: { ...data.client, note_1: trimmed } });
+      }
     } catch {
-      toast('Не удалось скопировать', 'error');
+      toast('Ошибка сохранения заметки', 'error');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const startAddNote = () => {
+    setNoteDraft('');
+    setNoteEditing(true);
+  };
+
+  const startEditNote = () => {
+    setNoteDraft(savedNote);
+    setNoteEditing(true);
+  };
+
+  const cancelNoteEdit = () => {
+    setNoteDraft(savedNote);
+    setNoteEditing(false);
+  };
+
+  const handleRepeatInvite = async () => {
+    if (!onRepeatInvite) return;
+    setRepeatSending(true);
+    try {
+      const res = await onRepeatInvite(data?.client);
+      const channels = res?.channels;
+      if (channels?.length > 1) {
+        toast('Приглашение отправлено в Telegram и MAX');
+      } else {
+        toast('Приглашение отправлено');
+      }
+      setShowRepeatConfirm(false);
+    } catch (err) {
+      toast(err?.response?.data?.error || err?.message || 'Ошибка отправки', 'error');
+    } finally {
+      setRepeatSending(false);
+    }
+  };
+
+  const handleBlacklist = async () => {
+    if (!blacklistReason.trim()) {
+      toast('Укажите причину', 'error');
+      return;
+    }
+    setBlacklistSaving(true);
+    try {
+      const c = data?.client;
+      await api.post('/master/me/blacklist', {
+        client_id: clientId,
+        name: displayClientName(c, form),
+        phone: c?.phone || form.phone || null,
+        reason: blacklistReason.trim()
+      });
+      setIsBlacklisted(true);
+      setShowBlacklistConfirm(false);
+      setBlacklistReason('');
+      toast('Клиент добавлен в чёрный список');
+    } catch (err) {
+      toast(err.response?.data?.error || 'Ошибка', 'error');
+    } finally {
+      setBlacklistSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== 'УДАЛИТЬ') return;
+    setDeleting(true);
+    try {
+      await api.delete(`/master/me/clients/${clientId}`);
+      toast('Клиент удалён из базы');
+      setShowDeleteConfirm(false);
+      onDelete?.(clientId);
+      onClose();
+    } catch (err) {
+      toast(err.response?.data?.error || 'Ошибка удаления', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
   const client = data?.client;
   const stats = data?.stats;
   const appointments = data?.appointments || [];
-  const messengerId = client?.messenger === 'telegram'
-    ? client?.telegram_user_id
-    : client?.max_user_id;
-  const canMessage = client?.can_message ?? !!(client?.max_user_id || client?.telegram_user_id);
-  const title = client?.display_name || client?.name || 'Клиент';
+  const activeAppointments = data?.active_appointments || [];
+  const phoneDisplay = client?.phone_display || formatRuPhoneDisplay(client?.phone || form.phone);
+  const telHref = client?.tel_href || toTelHref(client?.phone || form.phone);
+  const hasTelegram = client?.has_telegram ?? !!client?.telegram_user_id;
+  const hasMax = client?.has_max ?? !!client?.max_user_id;
+  const title = displayClientName(client, form);
+  const hasPhone = phoneDisplay && phoneDisplay !== '+7';
 
   return (
-    <Modal open={!!clientId} onClose={onClose} size="lg" bleed footer={null}>
-      {loading ? (
-        <div className="py-16 flex justify-center">
-          <PageLoader />
-        </div>
-      ) : !data ? (
-        <p className="text-sm text-ink-muted py-12 text-center px-6">Данные недоступны</p>
-      ) : (
-        <>
-          <div className="relative bg-gradient-to-br from-slate-800 via-slate-900 to-primary/90 px-5 sm:px-6 pt-6 pb-5 text-white">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(255,255,255,0.12),_transparent_55%)] pointer-events-none" />
-            <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
-              <ClientAvatar client={client} size="xl" className="!ring-white/40 !shadow-lg mx-auto sm:mx-0" />
-              <div className="flex-1 min-w-0 text-center sm:text-left">
-                <h2 className="text-xl sm:text-2xl font-bold truncate">{title}</h2>
-                {client.phone && (
-                  <p className="mt-1 text-sm text-white/85">{client.phone}</p>
+    <>
+      <Modal open={!!clientId} onClose={onClose} size="md" bleed footer={null}>
+        {loading ? (
+          <div className="py-12 flex justify-center">
+            <PageLoader />
+          </div>
+        ) : !data ? (
+          <p className="text-sm text-admin-textMuted py-10 text-center px-6">Данные недоступны</p>
+        ) : (
+          <div className="px-4 py-4 sm:px-5 space-y-4">
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <ClientAvatar client={client} size="lg" className="ring-2 ring-admin-accent/20" />
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base font-bold text-admin-text truncate leading-tight">{title}</h2>
+                {hasPhone && (
+                  <p className="mt-0.5 text-sm font-medium text-admin-textSecondary tabular-nums">{phoneDisplay}</p>
                 )}
-                <div className="mt-3 flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-semibold text-white">
-                    <MessengerLabel channel={client.messenger} size="sm" className="!text-white" />
-                  </span>
-                  {client.created_at && (
-                    <span className="text-xs text-white/70 bg-white/10 px-2 py-1 rounded-full">
-                      с {formatDate(client.created_at)}
-                    </span>
-                  )}
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {hasTelegram && <Badge tone="telegram" />}
+                  {hasMax && <Badge tone="max" />}
+                  {isBlacklisted && <Badge tone="danger">ЧС</Badge>}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 justify-center sm:justify-end shrink-0">
-                {canMessage && onMessage && (
-                  <Button
-                    size="sm"
-                    className="!bg-white !text-primary hover:!bg-white/90"
-                    onClick={() => onMessage(client)}
+              {telHref && (
+                <a href={telHref} className="shrink-0">
+                  <button
+                    type="button"
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm shadow-emerald-200/50 transition hover:bg-emerald-600 active:scale-95"
+                    title="Позвонить"
                   >
-                    <MessageCircle className="h-4 w-4" />
-                    Написать
-                  </Button>
-                )}
-                {onRepeatInvite && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="!bg-white/15 !text-white !border-white/25 hover:!bg-white/25"
-                    onClick={() => onRepeatInvite(client)}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    Повтор
-                  </Button>
-                )}
-              </div>
+                    <Phone className="h-4 w-4" />
+                  </button>
+                </a>
+              )}
             </div>
-          </div>
 
-          <div className="space-y-6 max-h-[58vh] overflow-y-auto p-5 sm:p-6">
-            {stats && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <StatBox label="Визитов" value={stats.total_visits} />
-                <StatBox label="Выручка" value={formatPrice(stats.total_revenue)} />
-                <StatBox label="Средний чек" value={formatPrice(stats.average_check)} />
-                <StatBox label="Предстоящие" value={stats.upcoming_visits} />
-              </div>
+            {/* Actions */}
+            <div className="flex flex-wrap gap-2">
+              {hasTelegram && onMessage && (
+                <MessengerWriteButton channel="telegram" onClick={() => onMessage(client, 'telegram')} />
+              )}
+              {hasMax && onMessage && (
+                <MessengerWriteButton channel="max" onClick={() => onMessage(client, 'max')} />
+              )}
+              {onRepeatInvite && (
+                <button
+                  type="button"
+                  onClick={() => setShowRepeatConfirm(true)}
+                  className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl border border-admin-border bg-white px-3 py-2 text-xs font-semibold text-admin-accent shadow-sm transition hover:bg-admin-accentSoft/50 active:scale-[0.98]"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Повторная запись
+                </button>
+              )}
+            </div>
+
+            {/* Stats */}
+            {stats && <ClientStatsGrid stats={stats} />}
+
+            {/* Active appointments */}
+            {activeAppointments.length > 0 && (
+              <section>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-admin-textMuted">Ближайшие</p>
+                <ul className="space-y-1">
+                  {activeAppointments.map((apt) => (
+                    <li
+                      key={apt.id}
+                      className="flex items-center justify-between gap-2 rounded-lg bg-white border border-admin-border/80 px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="min-w-0 truncate font-medium text-admin-text">{apt.service_name}</span>
+                      <span className="shrink-0 text-admin-textMuted">{formatDateTime(apt.appointment_time)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
 
-            <section className="space-y-3">
-              <h3 className="text-sm font-semibold text-ink">Мессенджер</h3>
-              <p className="text-xs text-ink-muted">
-                {client.messenger === 'telegram'
-                  ? 'Фото подтягивается из профиля Telegram при входе.'
-                  : 'Фото подтягивается из профиля MAX при входе.'}
-              </p>
-              <ContactRow
-                label={client.messenger === 'telegram' ? 'Telegram user ID' : 'MAX user ID'}
-                value={messengerId}
-                onCopy={messengerId ? () => handleCopyId(messengerId) : undefined}
-              />
-            </section>
-
-            <section className="space-y-3">
-              <h3 className="text-sm font-semibold text-ink">ФИО и телефон</h3>
-              <div className="grid gap-3 sm:grid-cols-3">
+            {/* Profile + note */}
+            <section className="rounded-xl border border-admin-border/80 bg-white p-2.5 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
                 <Input
                   label="Фамилия"
                   value={form.last_name}
                   onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                  placeholder="Иванова"
+                  placeholder="Рупасов"
                 />
                 <Input
                   label="Имя"
                   value={form.first_name}
                   onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                  placeholder="Мария"
-                />
-                <Input
-                  label="Отчество"
-                  value={form.patronymic}
-                  onChange={(e) => setForm({ ...form, patronymic: e.target.value })}
-                  placeholder="Петровна"
+                  placeholder="Евгений"
                 />
               </div>
               <Input
@@ -236,71 +370,197 @@ export default function ClientDetailModal({
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 placeholder="+7 ..."
-                hint="Для звонка или уточнения записи"
               />
-              <Button size="sm" onClick={handleSave} loading={saving}>
-                Сохранить карточку
+              <Button size="sm" className="w-full sm:w-auto" onClick={handleSaveProfile} loading={savingProfile}>
+                Сохранить
               </Button>
+
+              <div className="border-t border-admin-border/60 pt-2">
+                {noteEditing ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      rows={2}
+                      autoFocus
+                      placeholder="Например: любит капучино"
+                      className="input-field min-h-[56px] resize-y text-sm py-2"
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={handleSaveNote} loading={savingNote}>
+                        Сохранить
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={cancelNoteEdit} disabled={savingNote}>
+                        Отмена
+                      </Button>
+                    </div>
+                  </div>
+                ) : savedNote.trim() ? (
+                  <div className="flex items-start gap-2">
+                    <p className="min-w-0 flex-1 text-sm text-admin-text leading-snug whitespace-pre-wrap">{savedNote}</p>
+                    <button
+                      type="button"
+                      onClick={startEditNote}
+                      className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-admin-accent hover:text-admin-accentHover"
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Редактировать
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={startAddNote}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-admin-accent hover:text-admin-accentHover"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Добавить заметку
+                  </button>
+                )}
+              </div>
             </section>
 
-            <div>
-              <Textarea
-                label="Заметки о клиенте"
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                rows={3}
-                placeholder="Аллергии, предпочтения, важные детали..."
-              />
-            </div>
-
-            <div>
-              <h3 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-primary" />
-                История визитов
-              </h3>
+            {/* Visit history */}
+            <section>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-admin-textMuted flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                Последние визиты
+              </p>
               {appointments.length === 0 ? (
-                <p className="text-sm text-ink-muted rounded-xl border border-dashed border-slate-200 py-8 text-center">
+                <p className="text-xs text-admin-textMuted text-center py-3 rounded-lg border border-dashed border-admin-border">
                   Записей пока нет
                 </p>
               ) : (
-                <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100 overflow-hidden">
+                <ul className="rounded-xl border border-admin-border/80 overflow-hidden divide-y divide-admin-border/60">
                   {appointments.map((apt) => {
                     const st = STATUS_LABELS[apt.status] || STATUS_LABELS.confirmed;
                     return (
-                      <li key={apt.id} className="px-4 py-3 bg-white hover:bg-slate-50/80">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="font-medium text-ink">{apt.service_name}</p>
-                            <p className="text-xs text-ink-muted mt-0.5">
-                              {formatDateTime(apt.appointment_time)}
-                              {apt.salon_master_name && ` · ${apt.salon_master_name}`}
-                            </p>
-                            {apt.client_notes && (
-                              <p className="text-xs text-ink-secondary mt-1">{apt.client_notes}</p>
-                            )}
-                          </div>
-                          <div className="text-right shrink-0">
-                            <Badge tone={st.tone}>{st.label}</Badge>
-                            {apt.service_price != null && (
-                              <p className="text-sm font-semibold text-primary mt-1">{formatPrice(apt.service_price)}</p>
-                            )}
-                          </div>
+                      <li key={apt.id} className="flex items-center justify-between gap-2 bg-white px-2.5 py-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="font-medium text-admin-text truncate">{apt.service_name}</p>
+                          <p className="text-admin-textMuted">{formatDateTime(apt.appointment_time)}</p>
                         </div>
+                        <Badge tone={st.tone}>{st.label}</Badge>
                       </li>
                     );
                   })}
                 </ul>
               )}
-            </div>
+            </section>
 
-            <div className="pt-2 pb-1">
-              <Button variant="secondary" onClick={onClose} className="w-full sm:w-auto">
+            {/* Footer actions */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-admin-border/60">
+              {!isBlacklisted && (
+                <button
+                  type="button"
+                  onClick={() => setShowBlacklistConfirm(true)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-700 px-1 py-1"
+                >
+                  <ShieldOff className="h-3.5 w-3.5" />
+                  В чёрный список
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); }}
+                className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-700 px-1 py-1"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Удалить
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="ml-auto text-xs font-medium text-admin-textMuted hover:text-admin-text px-2 py-1"
+              >
                 Закрыть
-              </Button>
+              </button>
             </div>
           </div>
-        </>
-      )}
-    </Modal>
+        )}
+      </Modal>
+
+      <Modal
+        open={showRepeatConfirm}
+        onClose={() => !repeatSending && setShowRepeatConfirm(false)}
+        title="Пригласить на повторную запись?"
+        description={
+          hasTelegram && hasMax
+            ? 'Уведомление уйдёт в Telegram и MAX'
+            : hasTelegram
+              ? 'Уведомление уйдёт в Telegram'
+              : hasMax
+                ? 'Уведомление уйдёт в MAX'
+                : 'У клиента нет привязанного мессенджера'
+        }
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowRepeatConfirm(false)} disabled={repeatSending}>
+              Отмена
+            </Button>
+            <Button onClick={handleRepeatInvite} loading={repeatSending} disabled={!hasTelegram && !hasMax}>
+              Отправить
+            </Button>
+          </>
+        }
+      />
+
+      <Modal
+        open={showBlacklistConfirm}
+        onClose={() => !blacklistSaving && setShowBlacklistConfirm(false)}
+        title="Добавить в чёрный список?"
+        description={title}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowBlacklistConfirm(false)} disabled={blacklistSaving}>
+              Отмена
+            </Button>
+            <Button variant="danger" onClick={handleBlacklist} loading={blacklistSaving}>
+              Добавить
+            </Button>
+          </>
+        }
+      >
+        <Textarea
+          label="Причина"
+          value={blacklistReason}
+          onChange={(e) => setBlacklistReason(e.target.value)}
+          rows={3}
+          placeholder="Опишите причину..."
+        />
+      </Modal>
+
+      <Modal
+        open={showDeleteConfirm}
+        onClose={() => !deleting && setShowDeleteConfirm(false)}
+        title="Удалить клиента из базы?"
+        description="История записей сохранится. Клиент исчезнет из раздела «Клиенты»."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+              Отмена
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleDelete}
+              loading={deleting}
+              disabled={deleteConfirmText.trim().toUpperCase() !== 'УДАЛИТЬ'}
+            >
+              Удалить
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-admin-textSecondary mb-3">
+          Для подтверждения введите слово <strong>УДАЛИТЬ</strong>
+        </p>
+        <Input
+          value={deleteConfirmText}
+          onChange={(e) => setDeleteConfirmText(e.target.value)}
+          placeholder="УДАЛИТЬ"
+          autoComplete="off"
+        />
+      </Modal>
+    </>
   );
 }

@@ -1,5 +1,5 @@
 # Продакшен, когда SSL уже на домене masterclient45.ru (Beget, nginx на хосте и т.д.)
-# Caddy не используется — прокси с хостинга ведёт на порты ниже.
+# UI не в образе — только ./frontend/dist на хосте (deploy/sync-live.sh).
 services:
   postgres:
     image: postgres:15-alpine
@@ -34,6 +34,7 @@ services:
       FRONTEND_DIST: /app/frontend/dist
     volumes:
       - uploads_data:/app/uploads
+      - ./frontend/dist:/app/frontend/dist:ro
     depends_on:
       postgres:
         condition: service_healthy

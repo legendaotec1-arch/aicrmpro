@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 
-const SERVICE_NAME = process.env.BILLING_FROM_NAME || 'Wonder.ru';
+const SERVICE_NAME = process.env.BILLING_FROM_NAME || 'woner.ru';
 
 function isPlaceholder(value) {
   if (value == null) return true;

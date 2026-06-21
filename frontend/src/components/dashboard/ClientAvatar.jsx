@@ -9,12 +9,14 @@ function initialsFrom(client) {
 
 export default function ClientAvatar({ client, size = 'md', className = '' }) {
   const sizes = {
+    xs: 'h-8 w-8 text-xs',
     sm: 'h-10 w-10 text-sm',
     md: 'h-12 w-12 text-base',
     lg: 'h-16 w-16 text-lg',
     xl: 'h-20 w-20 text-xl'
   };
   const ring = {
+    xs: 'ring-1',
     sm: 'ring-2',
     md: 'ring-2',
     lg: 'ring-[3px]',

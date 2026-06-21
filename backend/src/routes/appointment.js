@@ -1,29 +1,15 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const { resolveTeamMasterId } = require('../utils/teamContext');
-const { findOrCreateClient } = require('../utils/clients');
+const { masterAuthMiddleware: authMiddleware } = require('../utils/masterAuth');
+const { findOrCreateClient, ensureSalonClientProfile, upsertSalonClientContact } = require('../utils/clients');
 const { sendMessengerNotification } = require('../utils/notify');
+const { displayPhone } = require('../utils/phoneRu');
+const { resolveTelegramChatUrl } = require('../utils/messengerLinks');
+const { validateBookingContact } = require('../utils/clientBookingValidation');
 
 const router = express.Router();
-
-// Middleware для проверки авторизации мастера
-const authMiddleware = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Не авторизован' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-    req.masterId = decoded.masterId;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Неверный токен' });
-  }
-};
 
 // Получить все записи мастера
 router.get('/', authMiddleware, async (req, res) => {
@@ -33,17 +19,27 @@ router.get('/', authMiddleware, async (req, res) => {
     let query = `
       SELECT a.*,
              c.name as client_name,
-             c.phone as client_phone,
+             COALESCE(NULLIF(scp.phone, ''), c.phone) as client_phone,
              c.telegram_user_id,
+             c.telegram_username,
              c.max_user_id,
              c.messenger as client_messenger,
              sm.name as salon_master_name
       FROM appointments a
       LEFT JOIN clients c ON a.client_id = c.id
+      LEFT JOIN salon_client_profiles scp
+        ON scp.client_id = c.id
+       AND scp.salon_id = a.master_id
+       AND COALESCE(scp.deleted_at, 'epoch'::timestamp) = 'epoch'::timestamp
       LEFT JOIN salon_masters sm ON a.salon_master_id = sm.id
       WHERE a.master_id = $1
     `;
     const params = [req.masterId];
+
+    if (req.isTeamMember && req.salonMasterId) {
+      params.push(req.salonMasterId);
+      query += ` AND a.salon_master_id = $${params.length}`;
+    }
 
     if (date) {
       query += ` AND DATE(a.appointment_time) = $${params.length + 1}`;
@@ -68,6 +64,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, async (req, res) => {
   try {
     const {
+      clientId: existingClientId,
       clientName,
       clientPhone,
       clientMaxUserId,
@@ -86,13 +83,58 @@ router.post('/', authMiddleware, async (req, res) => {
     const startMs = new Date(appointmentTime).getTime();
     const endMs = startMs + durationMinutes * 60000;
 
-    const clientId = await findOrCreateClient({
-      channel: clientChannel || (clientTelegramUserId ? 'telegram' : 'max'),
-      maxUserId: clientMaxUserId,
-      telegramUserId: clientTelegramUserId,
-      name: clientName,
-      phone: clientPhone
-    });
+    let clientId;
+
+    if (existingClientId) {
+      const access = await db.query(
+        `SELECT c.id
+         FROM clients c
+         WHERE c.id = $1
+           AND (
+             EXISTS (
+               SELECT 1 FROM salon_client_profiles scp
+               WHERE scp.client_id = c.id AND scp.salon_id = $2
+                 AND COALESCE(scp.deleted_at, 'epoch'::timestamp) = 'epoch'::timestamp
+             )
+             OR EXISTS (
+               SELECT 1 FROM appointments a
+               WHERE a.client_id = c.id AND a.master_id = $2
+             )
+           )`,
+        [existingClientId, req.masterId]
+      );
+      if (!access.rows.length) {
+        return res.status(404).json({ error: 'Клиент не найден' });
+      }
+      clientId = existingClientId;
+      await ensureSalonClientProfile(req.masterId, clientId);
+    } else {
+      const contact = validateBookingContact({
+        name: clientName,
+        phone: clientPhone,
+        requirePhone: false
+      });
+      if (!contact.ok) {
+        return res.status(400).json({ error: contact.error });
+      }
+
+      clientId = await findOrCreateClient({
+        channel: clientChannel || (clientTelegramUserId ? 'telegram' : 'max'),
+        maxUserId: clientMaxUserId,
+        telegramUserId: clientTelegramUserId,
+        name: contact.name,
+        phone: contact.phone || undefined,
+        salonId: req.masterId
+      });
+      clientId = await upsertSalonClientContact(req.masterId, clientId, {
+        phone: contact.phone,
+        name: contact.name
+      });
+    }
+
+    if (!serviceName?.trim()) {
+      return res.status(400).json({ error: 'Укажите услугу' });
+    }
 
     const booked = await db.query(
       `SELECT appointment_time, duration_minutes FROM appointments
@@ -125,11 +167,58 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+// Контакты клиента для карточки записи (телефон + ссылка в мессенджер)
+router.get('/:id/contact', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.query(
+      `SELECT COALESCE(NULLIF(scp.phone, ''), c.phone) AS client_phone,
+              c.telegram_user_id,
+              c.telegram_username,
+              c.max_user_id,
+              c.messenger AS client_messenger
+       FROM appointments a
+       JOIN clients c ON c.id = a.client_id
+       LEFT JOIN salon_client_profiles scp
+         ON scp.client_id = c.id
+        AND scp.salon_id = a.master_id
+        AND COALESCE(scp.deleted_at, 'epoch'::timestamp) = 'epoch'::timestamp
+       WHERE a.id = $1 AND a.master_id = $2`,
+      [id, req.masterId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Запись не найдена' });
+    }
+
+    const row = result.rows[0];
+    const phone = displayPhone(row.client_phone);
+    let telegramUrl = null;
+    if (row.client_messenger === 'telegram' && row.telegram_user_id) {
+      telegramUrl = await resolveTelegramChatUrl({
+        telegramUserId: row.telegram_user_id,
+        telegramUsername: row.telegram_username
+      });
+    }
+
+    res.json({
+      phone,
+      messenger: row.client_messenger,
+      telegramUrl,
+      maxUserId: row.max_user_id || null,
+      canMessage: !!(row.telegram_user_id || row.max_user_id)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при получении контактов' });
+  }
+});
+
 // Обновить запись
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const { serviceName, servicePrice, appointmentTime, duration, status, clientNotes } = req.body;
+    const { serviceName, servicePrice, appointmentTime, duration, status, clientNotes, cancelReason } = req.body;
 
     // Если меняем статус на отменён, получим данные для уведомления
     let clientData = null;
@@ -171,6 +260,36 @@ router.put('/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Запись не найдена' });
     }
 
+    if (status === 'no_show') {
+      const aptRow = await db.query(
+        `SELECT a.client_id, a.master_id, a.service_name, a.appointment_time
+         FROM appointments a
+         WHERE a.id = $1 AND a.master_id = $2`,
+        [id, req.masterId]
+      );
+      const row = aptRow.rows[0];
+      if (row?.client_id) {
+        await ensureSalonClientProfile(row.master_id, row.client_id);
+        const dateStr = new Date(row.appointment_time).toLocaleDateString('ru-RU', {
+          day: 'numeric',
+          month: 'long',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        const noteLine = `Неявка: ${dateStr}, ${row.service_name || 'запись'}`;
+        await db.query(
+          `UPDATE salon_client_profiles
+           SET notes = CASE
+             WHEN notes IS NULL OR TRIM(notes) = '' THEN $1
+             ELSE notes || E'\\n' || $1
+           END,
+           updated_at = NOW()
+           WHERE salon_id = $2 AND client_id = $3`,
+          [noteLine, row.master_id, row.client_id]
+        );
+      }
+    }
+
     // Отправляем уведомление при отмене
     if (status === 'cancelled' && clientData) {
       try {
@@ -188,7 +307,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
           ? `\n\nВаши контакты для связи: ${contacts.join(', ')}`
           : '';
 
-        const message = `❌ Ваша запись на ${clientData.service_name} (${dateStr}) отменена мастером.${contactStr}`;
+        const reasonStr = cancelReason && String(cancelReason).trim()
+          ? `\n\nПричина: ${String(cancelReason).trim()}`
+          : '';
+
+        const message = `❌ Ваша запись на ${clientData.service_name} (${dateStr}) отменена мастером.${reasonStr}${contactStr}`;
         await sendMessengerNotification(clientData, message);
       } catch (notifyErr) {
         console.error('[appointment] Failed to send cancel notification:', notifyErr.message);

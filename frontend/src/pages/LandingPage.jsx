@@ -66,7 +66,7 @@ export default function LandingPage() {
                 </h1>
 
                 <p className="mt-3 text-lg font-semibold text-[#2b2b2b] sm:text-xl">
-                  <span className="font-black text-primary">Wonder</span> — больше чем бизнес
+                  <span className="font-black text-primary">woner.ru</span> — больше чем бизнес
                 </p>
 
                 <p className="mt-3 mb-6 max-w-lg text-base text-slate-600 leading-relaxed sm:text-lg">

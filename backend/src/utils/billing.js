@@ -2,8 +2,8 @@ const db = require('../config/database');
 const { sendBalanceAlertEmail } = require('./email');
 
 const REGISTRATION_BONUS = Number(process.env.BILLING_REGISTRATION_BONUS) || 60;
-const PER_BOOKING_FEE = Number(process.env.BILLING_PER_BOOKING_FEE) || 30;
-const UNLIMITED_PRICE = Number(process.env.BILLING_UNLIMITED_PRICE) || 1500;
+const PER_BOOKING_FEE = Number(process.env.BILLING_PER_BOOKING_FEE) || 20;
+const UNLIMITED_PRICE = Number(process.env.BILLING_UNLIMITED_PRICE) || 900;
 const UNLIMITED_DAYS = Number(process.env.BILLING_UNLIMITED_DAYS) || 30;
 const MIN_TOPUP = Number(process.env.BILLING_MIN_TOPUP) || 100;
 const WARN_BALANCE = Number(process.env.BILLING_WARN_BALANCE) || 100;

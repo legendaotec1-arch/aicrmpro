@@ -3,28 +3,45 @@ const axios = require('axios');
 async function sendMessengerNotification(client, message, options = {}) {
   const maxBotUrl = process.env.MAX_BOT_URL || 'http://localhost:3001';
   const telegramBotUrl = process.env.TELEGRAM_BOT_URL || 'http://localhost:3002';
+  const channel = options.channel || 'all';
+  let sent = 0;
 
-  if (client.messenger === 'telegram' && client.telegram_user_id) {
+  const sendTelegram = channel === 'all' || channel === 'telegram';
+  const sendMax = channel === 'all' || channel === 'max';
+
+  if (sendTelegram && client.telegram_user_id) {
     await axios.post(`${telegramBotUrl}/notify`, {
       telegramUserId: client.telegram_user_id,
       message,
       replyUrl: options.replyUrl,
       replyText: options.replyText
     });
-    return true;
+    sent += 1;
   }
 
-  if (client.max_user_id) {
+  if (sendMax && client.max_user_id) {
     await axios.post(`${maxBotUrl}/notify`, {
       maxUserId: client.max_user_id,
       message,
       replyUrl: options.replyUrl,
       replyText: options.replyText
     });
-    return true;
+    sent += 1;
   }
 
-  return false;
+  if (sent === 0 && channel === 'all') {
+    if (client.messenger === 'telegram' && client.telegram_user_id) {
+      await axios.post(`${telegramBotUrl}/notify`, {
+        telegramUserId: client.telegram_user_id,
+        message,
+        replyUrl: options.replyUrl,
+        replyText: options.replyText
+      });
+      return true;
+    }
+  }
+
+  return sent > 0;
 }
 
 module.exports = { sendMessengerNotification };

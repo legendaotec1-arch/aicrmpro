@@ -38,6 +38,7 @@ import PhoneRuInput from '../components/ui/PhoneRuInput';
 import { formatDateTime, formatPrice } from '../lib/format';
 import { formatMasterPublicTitle } from '../lib/masterDisplay';
 import { isRuPhoneComplete, normalizeRuPhoneForStorage } from '../lib/phoneRu';
+import { canSubmitBooking, getClientNameError, isValidClientName } from '../lib/clientBooking';
 import { mediaUrl } from '../lib/media';
 import { getClientSession, setClientSession, clearClientSession } from '../lib/clientSession';
 
@@ -778,10 +779,10 @@ export default function ClientPage() {
   }, [selectedDate, master, clientAuth, selectedSalonMaster, selectedService, rescheduleId]);
 
   useEffect(() => {
-    if (clientAuth?.firstName && !formData.name) {
+    if (clientAuth?.firstName && isValidClientName(clientAuth.firstName) && !formData.name) {
       setFormData((prev) => ({ ...prev, name: clientAuth.firstName }));
     }
-  }, [clientAuth.firstName]);
+  }, [clientAuth.firstName, formData.name]);
 
   useEffect(() => {
     if (!clientAuth || !masterId) return;
@@ -789,8 +790,12 @@ export default function ClientPage() {
       masterId,
       channel: clientAuth.channel,
       userId: clientAuth.userId,
-      name: formData.name || clientAuth.firstName || undefined,
-      phone: formData.phone || undefined,
+      name: isValidClientName(formData.name)
+        ? formData.name.trim()
+        : isValidClientName(clientAuth.firstName)
+          ? clientAuth.firstName
+          : undefined,
+      phone: isRuPhoneComplete(formData.phone) ? normalizeRuPhoneForStorage(formData.phone) : undefined,
       photoUrl: clientAuth.photoUrl || undefined
     }).catch(() => {});
   }, [clientAuth, masterId, formData.name, formData.phone]);
@@ -907,9 +912,15 @@ export default function ClientPage() {
 
   const handleBooking = async (e) => {
     e.preventDefault();
-    if (!selectedSlot || !selectedService || !formData.name.trim() || !clientAuth) return;
+    if (!selectedSlot || !selectedService || !clientAuth) return;
+
+    const nameError = getClientNameError(formData.name);
+    if (nameError) {
+      alert(nameError);
+      return;
+    }
     if (!isRuPhoneComplete(formData.phone)) {
-      alert('Укажите номер телефона в формате +7 999 123 4567');
+      alert('Укажите номер телефона полностью в формате +7 999 123 4567');
       return;
     }
     setBooking(true);
@@ -1186,7 +1197,7 @@ export default function ClientPage() {
                 letterSpacing: '-0.02em',
               }}
             >
-              Wonder.ru
+              woner.ru
             </span>
 
             {/* Desktop tab navigation */}
@@ -1875,6 +1886,8 @@ export default function ClientPage() {
                             required
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            placeholder="Например, Анна"
+                            error={formData.name ? getClientNameError(formData.name) : null}
                           />
                           <PhoneRuInput
                             label="Телефон"
@@ -1886,7 +1899,7 @@ export default function ClientPage() {
                         <div style={{ marginTop: '16px' }}>
                           <PremiumCtaBtn
                             type="submit"
-                            disabled={!formData.name.trim() || !isRuPhoneComplete(formData.phone)}
+                            disabled={!canSubmitBooking(formData)}
                             loading={booking}
                           >
                             {rescheduleId ? 'Перенести запись' : 'Записаться'}

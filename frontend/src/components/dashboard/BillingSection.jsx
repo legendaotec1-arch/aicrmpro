@@ -55,7 +55,7 @@ function txMeta(type) {
 
 function BalanceHero({ data, unlimitedActive, balanceLow, bookingsLeft }) {
   const bookingOk = data?.online_booking_allowed !== false;
-  const fee = data?.per_booking_fee ?? data?.perBookingFee ?? 30;
+  const fee = data?.per_booking_fee ?? data?.perBookingFee ?? 20;
 
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-soft">
@@ -254,9 +254,9 @@ export default function BillingSection({ api, toast }) {
     load();
   }, [api, toast]);
 
-  const perBookingFee = data?.per_booking_fee ?? data?.perBookingFee ?? 30;
+  const perBookingFee = data?.per_booking_fee ?? data?.perBookingFee ?? 20;
   const minTopup = data?.min_topup ?? data?.minTopup ?? 100;
-  const unlimitedPrice = data?.unlimited_price ?? data?.unlimitedPrice ?? 1500;
+  const unlimitedPrice = data?.unlimited_price ?? data?.unlimitedPrice ?? 900;
   const unlimitedDays = data?.unlimited_days ?? data?.unlimitedDays ?? 30;
   const criticalBalance = data?.criticalBalance ?? 30;
 
@@ -310,21 +310,31 @@ export default function BillingSection({ api, toast }) {
 
   if (loading) return <PageLoader />;
 
-  const locked = data?.locked !== false;
+  const billingEnabled = data?.enabled === true;
+  const locked = data?.locked !== false && !billingEnabled;
+  const yookassaReady = data?.yookassaConfigured === true;
+  const payBlocked = billingEnabled && !yookassaReady;
 
   return (
     <div className="relative space-y-8 animate-fade-in">
       <header className="max-w-2xl">
-        <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary">
+        <div className="inline-flex items-center gap-2 rounded-full border border-admin-accent/20 bg-admin-accentSoft/50 px-3 py-1 text-xs font-semibold text-admin-accent">
           <Sparkles className="h-3.5 w-3.5" />
-          Прозрачная оплата
+          Баланс и тарифы
         </div>
-        <h1 className="mt-3 font-display text-2xl font-bold text-ink sm:text-3xl">Оплата и тариф</h1>
-        <p className="mt-2 text-sm leading-relaxed text-ink-secondary sm:text-base">
-          Управляйте балансом, выбирайте тариф и следите за списаниями. Записи, добавленные вручную в кабинете, не
-          тарифицируются.
+        <h1 className="mt-3 font-display text-2xl font-bold text-admin-text sm:text-3xl">Оплата</h1>
+        <p className="mt-2 text-sm leading-relaxed text-admin-textSecondary sm:text-base">
+          Пополняйте баланс от {minTopup} ₽ — списание {perBookingFee} ₽ за каждую онлайн-запись. Тариф «Безлимит» —{' '}
+          {formatMoney(unlimitedPrice)} на {unlimitedDays} дней. Ручные записи в кабинете бесплатны.
         </p>
       </header>
+
+      {payBlocked && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Платёжная система ЮKassa ещё не подключена на сервере. Баланс и история доступны; пополнение и безлимит
+          заработают после настройки ключей магазина.
+        </div>
+      )}
 
       {locked && (
         <div
@@ -399,7 +409,7 @@ export default function BillingSection({ api, toast }) {
                   value={topupAmount}
                   onChange={(e) => setTopupAmount(e.target.value)}
                 />
-                <Button onClick={startTopup} loading={paying} className="w-full" size="lg">
+                <Button onClick={startTopup} loading={paying} disabled={payBlocked} className="w-full" size="lg">
                   <Wallet className="h-4 w-4" />
                   Пополнить баланс
                 </Button>
@@ -408,7 +418,7 @@ export default function BillingSection({ api, toast }) {
 
             <TariffPlanCard
               featured
-              badge="Выгодно от ~50 записей"
+              badge="Выгодно от ~45 записей"
               title="Безлимит"
               price={formatMoney(unlimitedPrice)}
               period={`на ${unlimitedDays} дней · записей без лимита`}
@@ -442,6 +452,7 @@ export default function BillingSection({ api, toast }) {
                   variant={unlimitedActive ? 'secondary' : 'primary'}
                   onClick={startUnlimited}
                   loading={paying}
+                  disabled={payBlocked}
                   className="w-full"
                   size="lg"
                 >

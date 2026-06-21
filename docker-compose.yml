@@ -24,6 +24,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: crm_max_backend
+    env_file: .env
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -35,6 +36,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-your_super_secret_jwt_key_change_in_production}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:5173}
+      FRONTEND_DIST: /app/frontend/dist
+      UPLOADS_DIR: /app/uploads
       MAX_BOT_URL: http://bot:3001
       TELEGRAM_BOT_URL: http://telegram-bot:3002
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
@@ -44,6 +47,8 @@ services:
       - "3000:3000"
     volumes:
       - aicrmpro_uploads_data:/app/uploads
+      # Единственный источник UI — сборка на хосте (deploy/sync-live.sh). Не копировать dist в образ.
+      - ./frontend/dist:/app/frontend/dist:ro
     depends_on:
       postgres:
         condition: service_healthy

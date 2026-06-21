@@ -1,4 +1,6 @@
-# Продакшен: один домен, HTTPS через Caddy, сайт + API на backend:3000
+# Продакшен: один домен, HTTPS через Caddy.
+# ВАЖНО: UI не в образе backend — только volume ./frontend/dist (см. deploy/sync-live.sh).
+# На masterclient45.ru с nginx на хосте используйте docker-compose.yml, не этот файл без правок.
 services:
   postgres:
     image: postgres:15-alpine
@@ -31,6 +33,7 @@ services:
       FRONTEND_DIST: /app/frontend/dist
     volumes:
       - uploads_data:/app/uploads
+      - ./frontend/dist:/app/frontend/dist:ro
     depends_on:
       postgres:
         condition: service_healthy

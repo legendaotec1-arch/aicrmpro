@@ -1,7 +1,7 @@
 function buildStats(rows) {
-  const nonCancelled = rows.filter((a) => a.status !== 'cancelled');
+  const nonCancelled = rows.filter((a) => a.status !== 'cancelled' && a.status !== 'no_show');
   const completed = rows.filter((a) => a.status === 'completed');
-  const revenue = nonCancelled.reduce((s, a) => s + Number(a.service_price || 0), 0);
+  const revenue = completed.reduce((s, a) => s + Number(a.service_price || 0), 0);
 
   const serviceCounts = {};
   nonCancelled.forEach((a) => {
@@ -20,10 +20,10 @@ function buildStats(rows) {
   return {
     total_visits: nonCancelled.length,
     completed_visits: completed.length,
-    cancelled_visits: rows.filter((a) => a.status === 'cancelled').length,
+    cancelled_visits: rows.filter((a) => a.status === 'cancelled' || a.status === 'no_show').length,
     upcoming_visits: upcoming,
     total_revenue: revenue,
-    average_check: nonCancelled.length ? Math.round(revenue / nonCancelled.length) : 0,
+    average_check: completed.length ? Math.round(revenue / completed.length) : 0,
     first_visit: firstVisit,
     last_visit: lastVisit,
     favorite_service: favoriteService

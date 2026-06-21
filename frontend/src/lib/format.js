@@ -56,7 +56,8 @@ export function formatServicePrice(item) {
 export const STATUS_LABELS = {
   confirmed: { label: 'Подтверждена', tone: 'success' },
   cancelled: { label: 'Отменена', tone: 'danger' },
-  completed: { label: 'Завершена', tone: 'neutral' }
+  completed: { label: 'Завершена', tone: 'neutral' },
+  no_show: { label: 'Не пришёл', tone: 'danger' }
 };
 
 export const DAYS = [

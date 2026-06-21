@@ -144,10 +144,9 @@ export default function BookingLinkCard({
             </div>
             <Button
               size="sm"
-              variant="secondary"
               onClick={handleDownloadQr}
               loading={downloading}
-              className={glassButton}
+              className="shadow-sm"
             >
               <Download className="h-4 w-4" />
               Скачать

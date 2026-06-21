@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import Logo from '../brand/Logo';
+import { SITE_LEGAL } from '../../config/siteLegal';
 
 export default function AuthLayout({ children, title, subtitle }) {
   return (
@@ -19,7 +20,7 @@ export default function AuthLayout({ children, title, subtitle }) {
           </p>
         </div>
         <div className="text-xs text-white/40 space-y-2">
-          <p>© Wonder.ru</p>
+          <p>© {SITE_LEGAL.serviceName}</p>
           <p className="flex flex-wrap gap-x-3 gap-y-1">
             <Link to="/legal/offer" className="hover:text-white/70 transition">
               Оферта

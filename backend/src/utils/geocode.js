@@ -6,7 +6,7 @@ const {
 } = require('./yandexMaps');
 
 const NOMINATIM_HEADERS = {
-  'User-Agent': 'Wonder.ru/1.0 (https://masterclient45.ru)'
+  'User-Agent': 'woner.ru/1.0 (https://woner.ru)'
 };
 
 async function nominatimGeocode(address) {

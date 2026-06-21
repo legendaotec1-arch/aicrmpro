@@ -8,10 +8,15 @@ const {
   findOrCreateClient,
   getClientByMessengerUserId,
   normalizeChannel,
-  ensureSalonClientProfile
+  ensureSalonClientProfile,
+  upsertSalonClientContact,
+  mergeClientTelegramUsername
 } = require('../utils/clients');
+const { isRuPhoneComplete, normalizeRuPhoneForStorage } = require('../utils/phoneRu');
+const { validateBookingContact } = require('../utils/clientBookingValidation');
 const { resolveMasterId } = require('../utils/links');
 const { getSalonMasterById } = require('../utils/salonMasters');
+const { getAvailableSlots } = require('../utils/bookingSlots');
 const { verifyTelegramLoginWidget } = require('../utils/telegramAuth');
 const { getOrCreateConversation, listMessages, addMessage } = require('../utils/chat');
 const { notifyOwnerNewChatMessage, notifyOwnerNewReview } = require('../utils/salonNotify');
@@ -41,7 +46,7 @@ const reviewPhotoUpload = multer({
 // Синхронизация аватара из MAX/Telegram (вызывают боты при /start)
 router.post('/sync-avatar', async (req, res) => {
   try {
-    const { channel, userId, maxUserId, telegramUserId, photoUrl, name } = req.body;
+    const { channel, userId, maxUserId, telegramUserId, photoUrl, name, username } = req.body;
     const messenger = normalizeChannel(channel);
     const messengerUserId = userId || (messenger === 'telegram' ? telegramUserId : maxUserId);
     if (!messengerUserId) {
@@ -56,6 +61,13 @@ router.post('/sync-avatar', async (req, res) => {
         telegramUserId: messenger === 'telegram' ? messengerUserId : null,
         name: name || 'Клиент'
       });
+    }
+
+    if (name) {
+      await db.query('UPDATE clients SET name = COALESCE(NULLIF(name, \'\'), $1) WHERE id = $2', [name, clientId]);
+    }
+    if (username) {
+      await mergeClientTelegramUsername(clientId, username);
     }
 
     const saved = await applyClientPhoto(clientId, {
@@ -85,15 +97,19 @@ router.post('/identify', async (req, res) => {
     const master = await db.query('SELECT id FROM masters WHERE id = $1', [salonId]);
     if (master.rows.length === 0) return res.status(404).json({ error: 'Мастер не найден' });
 
-    const clientId = await findOrCreateClient({
+    let clientId = await findOrCreateClient({
       channel: messenger,
       maxUserId: messenger === 'max' ? messengerUserId : null,
       telegramUserId: messenger === 'telegram' ? messengerUserId : null,
       name,
-      phone
+      phone: isRuPhoneComplete(phone) ? normalizeRuPhoneForStorage(phone) : undefined,
+      salonId
     });
 
-    await ensureSalonClientProfile(salonId, clientId);
+    clientId = await upsertSalonClientContact(salonId, clientId, {
+      phone: isRuPhoneComplete(phone) ? phone : undefined,
+      name
+    });
     scheduleClientPhotoSync(clientId, {
       channel: messenger,
       messengerUserId,
@@ -144,14 +160,13 @@ router.post('/auth/telegram', async (req, res) => {
     const telegramUserId = String(id);
     const displayName = [first_name, last_name].filter(Boolean).join(' ').trim() || null;
 
-    let clientId = await getClientByMessengerUserId('telegram', telegramUserId);
-    if (!clientId) {
-      clientId = await findOrCreateClient({
-        channel: 'telegram',
-        telegramUserId,
-        name: displayName || username || 'Клиент'
-      });
-    }
+    let clientId = await findOrCreateClient({
+      channel: 'telegram',
+      telegramUserId,
+      name: displayName || username || 'Клиент',
+      telegramUsername: username,
+      salonId: resolvedMasterId
+    });
     await ensureSalonClientProfile(resolvedMasterId, clientId);
 
     if (photo_url) {
@@ -208,15 +223,13 @@ router.post('/reviews', reviewPhotoUpload.array('photos', 3), async (req, res) =
       return res.status(400).json({ error: 'Укажите оценку от 1 до 5' });
     }
 
-    let clientId = await getClientByMessengerUserId(messenger, messengerUserId);
-    if (!clientId) {
-      clientId = await findOrCreateClient({
-        channel: messenger,
-        maxUserId: messenger === 'max' ? messengerUserId : null,
-        telegramUserId: messenger === 'telegram' ? messengerUserId : null,
-        name: clientName
-      });
-    }
+    let clientId = await findOrCreateClient({
+      channel: messenger,
+      maxUserId: messenger === 'max' ? messengerUserId : null,
+      telegramUserId: messenger === 'telegram' ? messengerUserId : null,
+      name: clientName,
+      salonId
+    });
 
     const hasVisit = await db.query(
       `SELECT 1 FROM appointments
@@ -294,15 +307,13 @@ router.post('/:masterId/chat', async (req, res) => {
       return res.status(400).json({ error: 'Некорректное сообщение' });
     }
 
-    let clientId = await getClientByMessengerUserId(messenger, messengerUserId);
-    if (!clientId) {
-      clientId = await findOrCreateClient({
-        channel: messenger,
-        maxUserId: messenger === 'max' ? messengerUserId : null,
-        telegramUserId: messenger === 'telegram' ? messengerUserId : null,
-        name
-      });
-    }
+    let clientId = await findOrCreateClient({
+      channel: messenger,
+      maxUserId: messenger === 'max' ? messengerUserId : null,
+      telegramUserId: messenger === 'telegram' ? messengerUserId : null,
+      name,
+      salonId
+    });
 
     const conversationId = await getOrCreateConversation(salonId, clientId);
     const text = body.trim();
@@ -324,99 +335,21 @@ router.post('/:masterId/chat', async (req, res) => {
 router.get('/:masterId/slots', async (req, res) => {
   try {
     const salonId = resolveMasterId(req.params.masterId);
-    const { date, salonMasterId, durationMinutes } = req.query;
+    const { date, salonMasterId, durationMinutes, excludeAppointmentId } = req.query;
 
-    if (!date) {
-      return res.status(400).json({ error: 'Укажите дату' });
-    }
-    if (!salonMasterId) {
-      return res.status(400).json({ error: 'Укажите мастера' });
-    }
-
-    const teamMaster = await getSalonMasterById(salonMasterId, salonId);
-    if (!teamMaster || !teamMaster.is_active) {
-      return res.status(404).json({ error: 'Мастер не найден' });
-    }
-
-    const serviceDuration = Math.max(15, parseInt(durationMinutes, 10) || 60);
-    const stepMinutes = teamMaster.slot_step_minutes || 60;
-
-    const dateObj = new Date(date);
-    const dayOfWeek = dateObj.getDay();
-
-    const schedule = await db.query(
-      `SELECT * FROM work_schedule
-       WHERE salon_master_id = $1 AND day_of_week = $2 AND is_day_off = false`,
-      [salonMasterId, dayOfWeek]
-    );
-
-    if (schedule.rows.length === 0) {
-      return res.json([]);
-    }
-
-    const { start_time, end_time } = schedule.rows[0];
-
-    const dateStr = date.split('T')[0];
-    console.log('[slots] Full debug:', { salonMasterId, date, dateStr });
-
-    // Check work_schedule first
-    const workSched = await db.query(
-      `SELECT * FROM work_schedule WHERE salon_master_id = $1 AND day_of_week = $2`,
-      [salonMasterId, dayOfWeek]
-    );
-    console.log('[slots] Work schedule rows:', workSched.rows.length);
-
-    const exception = await db.query(
-      `SELECT * FROM schedule_exceptions
-       WHERE salon_master_id = $1 AND TO_CHAR(exception_date, 'YYYY-MM-DD') = $2`,
-      [salonMasterId, dateStr]
-    );
-
-    console.log('[slots] Exception rows:', exception.rows.length, exception.rows);
-    if (exception.rows.length > 0) {
-      console.log('[slots] Exception is_working:', exception.rows[0].is_working);
-    }
-
-    if (exception.rows.length > 0 && !exception.rows[0].is_working) {
-      console.log('[slots] Day is marked as day off, returning empty slots');
-      return res.json([]);
-    }
-
-    const exceptionStartTime = exception.rows[0]?.start_time;
-    const exceptionEndTime = exception.rows[0]?.end_time;
-
-    const slots = generateTimeSlots(
-      exceptionStartTime || start_time,
-      exceptionEndTime || end_time,
-      stepMinutes,
-      dateStr
-    );
-
-    const excludeAppointmentId = req.query.excludeAppointmentId || null;
-    const booked = await db.query(
-      `SELECT appointment_time, duration_minutes FROM appointments
-       WHERE salon_master_id = $1 AND DATE(appointment_time) = $2 AND status = 'confirmed'
-         AND ($3::uuid IS NULL OR id != $3::uuid)`,
-      [salonMasterId, dateStr, excludeAppointmentId]
-    );
-
-    const freeSlots = slots.filter((slot) => {
-      const slotStart = slot.getTime();
-      const slotEnd = slotStart + serviceDuration * 60000;
-      return !booked.rows.some((b) => {
-        const bookedStart = new Date(b.appointment_time).getTime();
-        const bookedEnd = bookedStart + (b.duration_minutes || 60) * 60000;
-        return slotStart < bookedEnd && slotEnd > bookedStart;
-      });
+    const slots = await getAvailableSlots(db, {
+      salonId,
+      salonMasterId,
+      date,
+      durationMinutes,
+      excludeAppointmentId: excludeAppointmentId || null
     });
 
-    res.json(freeSlots.map((s) => {
-      const offset = s.getTimezoneOffset() * 60000;
-      return new Date(s.getTime() - offset).toISOString().slice(0, 19) + '+05:00';
-    }));
+    res.json(slots);
   } catch (error) {
     console.error('Error fetching slots:', error);
-    res.status(500).json({ error: 'Ошибка при получении слотов' });
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка при получении слотов' });
   }
 });
 
@@ -446,6 +379,11 @@ router.post('/book', async (req, res) => {
 
     if (!salonMasterId) {
       return res.status(400).json({ error: 'Укажите мастера' });
+    }
+
+    const contact = validateBookingContact({ name, phone });
+    if (!contact.ok) {
+      return res.status(400).json({ error: contact.error });
     }
 
     const teamMaster = await getSalonMasterById(salonMasterId, resolvedSalonId);
@@ -485,28 +423,39 @@ router.post('/book', async (req, res) => {
       }
     }
 
-    const clientId = await findOrCreateClient({
+    let clientId = await findOrCreateClient({
       channel: messenger,
       maxUserId: messenger === 'max' ? maxUserId : null,
       telegramUserId: messenger === 'telegram' ? telegramUserId : null,
-      name,
-      phone
+      name: contact.name,
+      phone: contact.phone,
+      salonId: resolvedSalonId
     });
 
-    // Check blacklist
+    clientId = await upsertSalonClientContact(resolvedSalonId, clientId, {
+      phone: contact.phone,
+      name: contact.name
+    });
+
+    // Check blacklist (salon-wide or for selected master)
     const blockedByClient = await db.query(
-      'SELECT 1 FROM blacklist WHERE master_id = $1 AND client_id = $2 LIMIT 1',
-      [resolvedSalonId, clientId]
+      `SELECT 1 FROM blacklist
+       WHERE master_id = $1 AND client_id = $2
+         AND (salon_master_id IS NULL OR salon_master_id = $3)
+       LIMIT 1`,
+      [resolvedSalonId, clientId, salonMasterId]
     );
     const blockedByPhone = await db.query(
-      'SELECT 1 FROM blacklist WHERE master_id = $1 AND phone = $2 LIMIT 1',
-      [resolvedSalonId, phone]
+      `SELECT 1 FROM blacklist
+       WHERE master_id = $1 AND phone = $2
+         AND (salon_master_id IS NULL OR salon_master_id = $3)
+       LIMIT 1`,
+      [resolvedSalonId, contact.phone, salonMasterId]
     );
     if (blockedByClient.rows.length > 0 || blockedByPhone.rows.length > 0) {
       return res.status(403).json({ error: 'Запись недоступна', code: 'BLOCKED' });
     }
 
-    await ensureSalonClientProfile(resolvedSalonId, clientId);
     scheduleClientPhotoSync(clientId, {
       channel: messenger,
       messengerUserId: messenger === 'telegram' ? telegramUserId : maxUserId,
@@ -583,7 +532,9 @@ router.put('/appointment/:appointmentId/reschedule', async (req, res) => {
       serviceName,
       servicePrice,
       duration,
-      clientNotes
+      clientNotes,
+      name,
+      phone
     } = req.body;
 
     const messenger = normalizeChannel(channel);
@@ -591,6 +542,27 @@ router.put('/appointment/:appointmentId/reschedule', async (req, res) => {
     const clientId = await getClientByMessengerUserId(messenger, messengerUserId);
     if (!clientId) {
       return res.status(404).json({ error: 'Запись не найдена' });
+    }
+
+    if (name != null || phone != null) {
+      const contact = validateBookingContact({
+        name: name || ' ',
+        phone: phone || '',
+        requirePhone: true
+      });
+      if (!contact.ok) {
+        return res.status(400).json({ error: contact.error });
+      }
+      const salonId = (await db.query(
+        `SELECT master_id FROM appointments WHERE id = $1 AND client_id = $2`,
+        [appointmentId, clientId]
+      )).rows[0]?.master_id;
+      if (salonId) {
+        await upsertSalonClientContact(salonId, clientId, {
+          phone: contact.phone,
+          name: contact.name
+        });
+      }
     }
 
     const current = await db.query(
@@ -717,24 +689,5 @@ router.post('/cancel/:appointmentId', async (req, res) => {
     res.status(500).json({ error: 'Ошибка при отмене записи' });
   }
 });
-
-function generateTimeSlots(startTime, endTime, stepMinutes = 60, baseDateStr) {
-  const slots = [];
-  const [startHour, startMin] = String(startTime).split(':').map(Number);
-  const [endHour, endMin] = String(endTime).split(':').map(Number);
-  const step = Math.max(15, parseInt(stepMinutes, 10) || 60);
-
-  // Use the provided date string to avoid timezone shift
-  const [year, month, day] = String(baseDateStr).split('-').map(Number);
-  const current = new Date(year, month - 1, day, startHour, startMin, 0, 0);
-  const end = new Date(year, month - 1, day, endHour, endMin, 0, 0);
-
-  while (current < end) {
-    slots.push(new Date(current));
-    current.setMinutes(current.getMinutes() + step);
-  }
-
-  return slots;
-}
 
 module.exports = router;
