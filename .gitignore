@@ -38,6 +38,12 @@ Thumbs.db
 *.tmp
 *.temp
 
+# Deploy archives (генерируются локально: deploy/make-deploy-zip.ps1)
+deploy/aicrmpro-deploy.zip
+deploy/aicrmpro-deploy.tar.gz
+deploy/cmd-test.tar.gz
+deploy/test.tar.gz
+
 # Cloudflare
 cloudflared/
 
