@@ -58,7 +58,8 @@ const {
   buildBookingLink,
   DEFAULT_MESSAGE
 } = require('../utils/repeatInvite');
-const { sanitizeMasterMediaRow } = require('../utils/mediaResolve');
+const { sanitizeMasterMediaRow, sanitizePortfolioRow } = require('../utils/mediaResolve');
+const { internalAuthHeaders } = require('../utils/internalAuth');
 const { queryWithColumnFallback } = require('../utils/safeQuery');
 const { buildClientContactInfo, buildClientPhoneFields, buildClientChannelFields } = require('../utils/clientContact');
 const {
@@ -95,7 +96,29 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage, limits: { fileSize: 60 * 1024 * 1024 } }); // фото и короткие видео
+const upload = multer({ storage, limits: { fileSize: 60 * 1024 * 1024 } }); // legacy fallback
+
+const imageMimeFilter = (_req, file, cb) => {
+  if (/^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.mimetype || '')) cb(null, true);
+  else cb(new Error('Допустимы только изображения'));
+};
+
+const mediaMimeFilter = (_req, file, cb) => {
+  if (/^image\//i.test(file.mimetype || '') || /^video\//i.test(file.mimetype || '')) cb(null, true);
+  else cb(new Error('Допустимы только изображения и видео'));
+};
+
+const uploadImage = multer({
+  storage,
+  limits: { fileSize: 60 * 1024 * 1024 },
+  fileFilter: imageMimeFilter
+});
+
+const uploadMedia = multer({
+  storage,
+  limits: { fileSize: 60 * 1024 * 1024 },
+  fileFilter: mediaMimeFilter
+});
 
 const uploadVideoReel = multer({
   storage,
@@ -274,7 +297,7 @@ router.put('/me/salon-masters/:id', authMiddleware, requireOwner, async (req, re
   }
 });
 
-router.post('/me/salon-masters/:id/photo', authMiddleware, upload.single('photo'), async (req, res) => {
+router.post('/me/salon-masters/:id/photo', authMiddleware, uploadImage.single('photo'), async (req, res) => {
   try {
     const row = await getSalonMasterById(req.params.id, req.masterId);
     if (!row) return res.status(404).json({ error: 'Мастер не найден' });
@@ -288,7 +311,7 @@ router.post('/me/salon-masters/:id/photo', authMiddleware, upload.single('photo'
   }
 });
 
-router.delete('/me/salon-masters/:id', authMiddleware, async (req, res) => {
+router.delete('/me/salon-masters/:id', authMiddleware, requireOwner, async (req, res) => {
   try {
     const row = await getSalonMasterById(req.params.id, req.masterId);
     if (!row) return res.status(404).json({ error: 'Мастер не найден' });
@@ -308,7 +331,7 @@ router.delete('/me/salon-masters/:id', authMiddleware, async (req, res) => {
   }
 });
 
-router.delete('/me/salon-masters/:id/permanent', authMiddleware, async (req, res) => {
+router.delete('/me/salon-masters/:id/permanent', authMiddleware, requireOwner, async (req, res) => {
   try {
     const row = await getSalonMasterById(req.params.id, req.masterId);
     if (!row) return res.status(404).json({ error: 'Мастер не найден' });
@@ -423,7 +446,7 @@ router.get('/:masterId', async (req, res) => {
       },
       teamMasters,
       priceGroups,
-      portfolio: portfolio.rows,
+      portfolio: portfolio.rows.map(sanitizePortfolioRow),
       priceList,
       reviewSummary: {
         count: reviewStats.rows[0]?.count || 0,
@@ -624,7 +647,7 @@ router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
 });
 
 // Загрузить логотип
-router.post('/me/logo', authMiddleware, upload.single('logo'), async (req, res) => {
+router.post('/me/logo', authMiddleware, uploadImage.single('logo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не загружен' });
@@ -944,7 +967,7 @@ router.delete('/me/prices/:id', authMiddleware, async (req, res) => {
 });
 
 // Загрузить фото для прайс-листа
-router.post('/me/prices/upload', authMiddleware, upload.single('image'), async (req, res) => {
+router.post('/me/prices/upload', authMiddleware, uploadImage.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не загружен' });
@@ -970,7 +993,7 @@ router.get('/me/portfolio', authMiddleware, async (req, res) => {
 });
 
 // Добавить медиа на главную страницу клиента (общее портфолио салона)
-router.post('/me/portfolio', authMiddleware, upload.single('media'), async (req, res) => {
+router.post('/me/portfolio', authMiddleware, uploadMedia.single('media'), async (req, res) => {
   try {
     const { title, sort_order, media_type, video_url } = req.body;
     const existingVideos = await db.query(
@@ -1372,7 +1395,7 @@ router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
             message,
             replyUrl: buildClientWebUrl(req.masterId, 'telegram', client.telegram_user_id, 'chat'),
             replyText: 'Ответить мастеру'
-          });
+          }, { headers: internalAuthHeaders() });
           sent++;
         } else if (client.max_user_id) {
           await axios.post(`${maxBotUrl}/notify`, {
@@ -1380,7 +1403,7 @@ router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
             message,
             replyUrl: buildClientWebUrl(req.masterId, 'max', client.max_user_id, 'chat'),
             replyText: 'Ответить мастеру'
-          });
+          }, { headers: internalAuthHeaders() });
           sent++;
         }
       } catch (err) {

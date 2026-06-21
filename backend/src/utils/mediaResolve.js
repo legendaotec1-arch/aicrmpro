@@ -43,9 +43,20 @@ function sanitizeMasterMediaRow(row) {
   };
 }
 
+function sanitizePortfolioRow(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    image_url: resolveStoredUploadUrl(row.image_url),
+    video_url: resolveStoredUploadUrl(row.video_url),
+    thumbnail_url: resolveStoredUploadUrl(row.thumbnail_url)
+  };
+}
+
 module.exports = {
   resolveStoredUploadUrl,
   resolveStoredPhotoUrl,
   sanitizeSalonMasterRow,
-  sanitizeMasterMediaRow
+  sanitizeMasterMediaRow,
+  sanitizePortfolioRow
 };

@@ -7,6 +7,13 @@ function isYookassaConfigured() {
   return Boolean(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY);
 }
 
+function getAuth() {
+  return {
+    username: process.env.YOOKASSA_SHOP_ID,
+    password: process.env.YOOKASSA_SECRET_KEY
+  };
+}
+
 function getReturnUrl() {
   const base = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
   return process.env.YOOKASSA_RETURN_URL || `${base}/dashboard?section=billing`;
@@ -32,10 +39,7 @@ async function createPayment({ amount, description, metadata }) {
       metadata
     },
     {
-      auth: {
-        username: process.env.YOOKASSA_SHOP_ID,
-        password: process.env.YOOKASSA_SECRET_KEY
-      },
+      auth: getAuth(),
       headers: { 'Idempotence-Key': idempotenceKey },
       timeout: 20000
     }
@@ -44,8 +48,20 @@ async function createPayment({ amount, description, metadata }) {
   return res.data;
 }
 
+async function fetchPayment(paymentId) {
+  if (!isYookassaConfigured()) {
+    throw new Error('YooKassa не настроена');
+  }
+  const res = await axios.get(`${API_URL}/payments/${encodeURIComponent(paymentId)}`, {
+    auth: getAuth(),
+    timeout: 20000
+  });
+  return res.data;
+}
+
 module.exports = {
   isYookassaConfigured,
   getReturnUrl,
-  createPayment
+  createPayment,
+  fetchPayment
 };

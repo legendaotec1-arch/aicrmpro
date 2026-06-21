@@ -3,7 +3,7 @@ const {
   isBillingEnabled,
   getBillingConfig
 } = require('../utils/billing');
-const { isYookassaConfigured } = require('../utils/yookassa');
+const { isYookassaConfigured, fetchPayment } = require('../utils/yookassa');
 
 const router = express.Router();
 
@@ -16,6 +16,10 @@ router.get('/config', (req, res) => {
 
 router.post('/yookassa/webhook', async (req, res) => {
   try {
+    if (!isBillingEnabled() || !isYookassaConfigured()) {
+      return res.json({ ok: true });
+    }
+
     const db = require('../config/database');
     const { applyTopup, applyUnlimitedPurchase } = require('../utils/billing');
 
@@ -26,12 +30,18 @@ router.post('/yookassa/webhook', async (req, res) => {
       return res.json({ ok: true });
     }
 
-    const metadata = payment.metadata || {};
+    const verified = await fetchPayment(payment.id);
+    if (verified.status !== 'succeeded') {
+      console.warn('YooKassa webhook: payment not succeeded in API', payment.id, verified.status);
+      return res.json({ ok: true });
+    }
+
+    const metadata = verified.metadata || {};
     const masterId = metadata.master_id;
     const purpose = metadata.purpose;
-    const amount = Number(payment.amount?.value || 0);
+    const amount = Number(verified.amount?.value || 0);
 
-    if (!masterId || !purpose) {
+    if (!masterId || !purpose || amount <= 0) {
       console.warn('YooKassa webhook: missing metadata', payment.id);
       return res.json({ ok: true });
     }

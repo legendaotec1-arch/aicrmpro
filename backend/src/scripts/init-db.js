@@ -1,19 +1,26 @@
+require('dotenv').config();
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: 'ruthohegrilee.beget.app',
-  port: 5432,
-  database: 'aicrmpro',
-  user: 'cloud_user',
-  password: 'LegendOtec!2026',
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME || 'crm_max',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD,
 });
 
 async function initializeDatabase() {
-  try {
-    console.log('Подключение к PostgreSQL на Beget...');
+  if (!process.env.DB_PASSWORD) {
+    console.error('❌ Укажите DB_HOST, DB_NAME, DB_USER, DB_PASSWORD в .env');
+    process.exit(1);
+  }
 
-    // Создаем таблицы
+  try {
+    console.log('Подключение к PostgreSQL...');
+
     await pool.query(`
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
       CREATE TABLE IF NOT EXISTS masters (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         email VARCHAR(255) UNIQUE NOT NULL,
@@ -112,6 +119,7 @@ async function initializeDatabase() {
     console.log('✅ Таблицы успешно созданы!');
   } catch (error) {
     console.error('❌ Ошибка при создании таблиц:', error);
+    process.exit(1);
   } finally {
     await pool.end();
   }

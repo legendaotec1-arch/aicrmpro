@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const { Telegraf, Markup } = require('telegraf');
+const { requireInternalSecret, internalAuthHeaders } = require('./internalAuth');
 
 const app = express();
 app.use(cors());
@@ -199,7 +200,7 @@ async function syncClientAvatar(ctx) {
         name,
         username: ctx.from.username || undefined
       },
-      { timeout: 15000 }
+      { timeout: 15000, headers: internalAuthHeaders() }
     );
   } catch (err) {
     console.error('Telegram sync-avatar:', err.response?.data || err.message);
@@ -208,7 +209,8 @@ async function syncClientAvatar(ctx) {
 
 async function fetchAppointments(userId) {
   const res = await axios.get(`${API_BASE}/api/client/my/${userId}`, {
-    params: { channel: 'telegram' }
+    params: { channel: 'telegram' },
+    headers: internalAuthHeaders()
   });
   return res.data;
 }
@@ -277,7 +279,7 @@ bot.action(/^cancel_apt:(.+)$/, async (ctx) => {
     await axios.post(`${API_BASE}/api/client/cancel/${appointmentId}`, {
       channel: 'telegram',
       userId
-    });
+    }, { headers: internalAuthHeaders() });
     await ctx.answerCbQuery('Запись отменена');
     await ctx.reply('Запись отменена.');
   } catch (err) {
@@ -316,7 +318,7 @@ bot.hears(/^\/cancel_(.+)$/, async (ctx) => {
     await axios.post(`${API_BASE}/api/client/cancel/${appointmentId}`, {
       channel: 'telegram',
       userId
-    });
+    }, { headers: internalAuthHeaders() });
     await ctx.reply('✅ Запись отменена');
   } catch (err) {
     await ctx.reply('❌ Не удалось отменить запись');
@@ -328,7 +330,7 @@ bot.launch().then(() => console.log(`Telegram bot (polling) запущен, API_
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
-app.post('/notify', async (req, res) => {
+app.post('/notify', requireInternalSecret, async (req, res) => {
   try {
     const { telegramUserId, message, replyUrl, replyText } = req.body;
     if (!telegramUserId || !message) {

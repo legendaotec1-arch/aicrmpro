@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
+const db = require('../config/database');
+const { resolveJwtSecret } = require('./jwtConfig');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+const JWT_SECRET = resolveJwtSecret();
 
 function signMasterToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
@@ -18,7 +20,7 @@ function attachSession(req, decoded) {
   req.isTeamMember = req.role === 'team';
 }
 
-function masterAuthMiddleware(req, res, next) {
+async function masterAuthMiddleware(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -27,6 +29,17 @@ function masterAuthMiddleware(req, res, next) {
     const token = authHeader.split(' ')[1];
     const decoded = verifyMasterToken(token);
     attachSession(req, decoded);
+
+    if (req.isTeamMember && req.salonMasterId) {
+      const active = await db.query(
+        'SELECT is_active FROM salon_masters WHERE id = $1 AND salon_id = $2',
+        [req.salonMasterId, req.masterId]
+      );
+      if (!active.rows[0] || active.rows[0].is_active === false) {
+        return res.status(403).json({ error: 'Доступ отключён' });
+      }
+    }
+
     next();
   } catch {
     res.status(401).json({ error: 'Неверный токен' });
@@ -45,5 +58,6 @@ module.exports = {
   verifyMasterToken,
   attachSession,
   masterAuthMiddleware,
-  requireOwner
+  requireOwner,
+  resolveJwtSecret: () => JWT_SECRET
 };

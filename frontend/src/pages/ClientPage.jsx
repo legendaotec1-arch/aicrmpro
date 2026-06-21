@@ -43,6 +43,7 @@ import { isRuPhoneComplete, normalizeRuPhoneForStorage } from '../lib/phoneRu';
 import { canSubmitBooking, getClientNameError, isValidClientName } from '../lib/clientBooking';
 import { mediaUrl } from '../lib/media';
 import { getClientSession, setClientSession, clearClientSession } from '../lib/clientSession';
+import { withClientAuth } from '../lib/clientApi';
 
 // ============================================================
 // PREMIUM iOS DESIGN TOKENS — INLINE STYLES
@@ -747,9 +748,12 @@ export default function ClientPage() {
     if (!clientAuth) return;
     setAppointmentsLoading(true);
     try {
-      const res = await axios.get(`/api/client/my/${encodeURIComponent(clientAuth.userId)}`, {
-        params: { channel: clientAuth.channel, masterId }
-      });
+      const res = await axios.get(
+        `/api/client/my/${encodeURIComponent(clientAuth.userId)}`,
+        withClientAuth(clientAuth, {
+          params: { channel: clientAuth.channel, masterId }
+        })
+      );
       setAppointments(res.data || []);
     } catch (err) {
       console.error(err);
@@ -795,7 +799,15 @@ export default function ClientPage() {
           : undefined,
       phone: isRuPhoneComplete(formData.phone) ? normalizeRuPhoneForStorage(formData.phone) : undefined,
       photoUrl: clientAuth.photoUrl || undefined
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (res.data?.clientToken) {
+          const updated = { ...clientAuth, clientToken: res.data.clientToken };
+          setClientSession(masterId, updated);
+          setClientAuth(updated);
+        }
+      })
+      .catch(() => {});
   }, [clientAuth, masterId, formData.name, formData.phone]);
 
   useEffect(() => {
@@ -818,9 +830,12 @@ export default function ClientPage() {
     (async () => {
       setRescheduleLoading(true);
       try {
-        const res = await axios.get(`/api/client/appointment/${rescheduleId}`, {
-          params: { channel: clientAuth.channel, userId: clientAuth.userId }
-        });
+        const res = await axios.get(
+          `/api/client/appointment/${rescheduleId}`,
+          withClientAuth(clientAuth, {
+            params: { channel: clientAuth.channel, userId: clientAuth.userId }
+          })
+        );
         if (cancelled) return;
         const apt = res.data;
         const teamMaster = teamMasters.find((m) => m.id === apt.salon_master_id) || teamMasters[0] || null;
@@ -968,10 +983,11 @@ export default function ClientPage() {
       if (clientAuth.channel === 'telegram') payload.telegramUserId = clientAuth.userId;
       else payload.maxUserId = clientAuth.userId;
 
-      if (rescheduleId) await axios.put(`/api/client/appointment/${rescheduleId}/reschedule`, payload);
-      else {
+      if (rescheduleId) {
+        await axios.put(`/api/client/appointment/${rescheduleId}/reschedule`, payload, withClientAuth(clientAuth));
+      } else {
         console.log('[book] Запись на услугу:', payload);
-        await axios.post('/api/client/book', payload);
+        await axios.post('/api/client/book', payload, withClientAuth(clientAuth));
       }
 
       setStep('done');
@@ -990,7 +1006,7 @@ export default function ClientPage() {
       const payload = { channel: clientAuth.channel, userId: clientAuth.userId };
       if (clientAuth.channel === 'telegram') payload.telegramUserId = clientAuth.userId;
       else payload.maxUserId = clientAuth.userId;
-      await axios.post(`/api/client/cancel/${appointmentId}`, payload);
+      await axios.post(`/api/client/cancel/${appointmentId}`, payload, withClientAuth(clientAuth));
       setConfirmDialog(null);
       await loadAppointments();
     } catch (err) {

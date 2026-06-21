@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
+import { withClientAuth } from '../../lib/clientApi';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { formatDateTime } from '../../lib/format';
@@ -15,7 +16,8 @@ export default function ClientChatPanel({ masterId, clientAuth, formData }) {
     if (!clientAuth) return;
     try {
       const res = await axios.get(
-        `/api/client/${masterId}/chat?channel=${clientAuth.channel}&userId=${encodeURIComponent(clientAuth.userId)}`
+        `/api/client/${masterId}/chat?channel=${clientAuth.channel}&userId=${encodeURIComponent(clientAuth.userId)}`,
+        withClientAuth(clientAuth)
       );
       setMessages(res.data.messages || []);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -42,7 +44,7 @@ export default function ClientChatPanel({ masterId, clientAuth, formData }) {
         telegramUserId: clientAuth.channel === 'telegram' ? clientAuth.userId : undefined,
         body: text.trim(),
         name: formData?.name
-      });
+      }, withClientAuth(clientAuth));
       setText('');
       inputRef.current?.blur();
       await load();

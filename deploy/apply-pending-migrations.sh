@@ -68,6 +68,52 @@ CREATE TABLE IF NOT EXISTS billing_payments (
   status VARCHAR(20) NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS blacklist (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  master_id UUID NOT NULL REFERENCES masters(id) ON DELETE CASCADE,
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  phone VARCHAR(20),
+  name VARCHAR(255),
+  reason TEXT NOT NULL,
+  salon_master_id UUID REFERENCES salon_masters(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS blacklist_master_id_client_id_key ON blacklist(master_id, client_id);
+CREATE INDEX IF NOT EXISTS idx_blacklist_master ON blacklist(master_id);
+CREATE INDEX IF NOT EXISTS idx_blacklist_client ON blacklist(client_id);
+CREATE INDEX IF NOT EXISTS idx_blacklist_salon_master ON blacklist (salon_master_id);
+
+ALTER TABLE masters ADD COLUMN IF NOT EXISTS video_reel_url TEXT;
+
+ALTER TABLE salon_masters ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+ALTER TABLE salon_masters ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE salon_masters ADD COLUMN IF NOT EXISTS commission_percent NUMERIC(5,2) NOT NULL DEFAULT 0;
+ALTER TABLE salon_masters ADD COLUMN IF NOT EXISTS last_name VARCHAR(255);
+CREATE UNIQUE INDEX IF NOT EXISTS salon_masters_email_lower_unique
+  ON salon_masters (LOWER(email))
+  WHERE email IS NOT NULL AND email <> '';
+
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255);
+
+ALTER TABLE appointments DROP CONSTRAINT IF EXISTS appointments_status_check;
+ALTER TABLE appointments ADD CONSTRAINT appointments_status_check
+  CHECK (status IN ('confirmed', 'cancelled', 'completed', 'no_show'));
+
+ALTER TABLE work_schedule
+  DROP CONSTRAINT IF EXISTS work_schedule_master_id_day_of_week_key;
+ALTER TABLE schedule_exceptions
+  DROP CONSTRAINT IF EXISTS schedule_exceptions_master_id_exception_date_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_schedule_team
+  ON work_schedule (salon_master_id, day_of_week)
+  WHERE salon_master_id IS NOT NULL;
+
+ALTER TABLE salon_client_profiles ADD COLUMN IF NOT EXISTS note_1 TEXT;
+ALTER TABLE salon_client_profiles ADD COLUMN IF NOT EXISTS note_2 TEXT;
+ALTER TABLE salon_client_profiles ADD COLUMN IF NOT EXISTS note_3 TEXT;
+UPDATE salon_client_profiles
+SET note_1 = notes
+WHERE notes IS NOT NULL AND TRIM(notes) != '' AND (note_1 IS NULL OR TRIM(note_1) = '');
 SQL
 
 echo "==> Migrations OK"

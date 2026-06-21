@@ -44,6 +44,9 @@ deploy/aicrmpro-deploy.tar.gz
 deploy/cmd-test.tar.gz
 deploy/test.tar.gz
 
+# Local full backups (deploy/full-backup.sh)
+backups/
+
 # Cloudflare
 cloudflared/
 

@@ -8,6 +8,8 @@ const { sendMessengerNotification } = require('../utils/notify');
 const { displayPhone } = require('../utils/phoneRu');
 const { resolveTelegramChatUrl } = require('../utils/messengerLinks');
 const { validateBookingContact } = require('../utils/clientBookingValidation');
+const { teamAppointmentFilter } = require('../utils/appointmentScope');
+const { assertSlotAvailable, withBookingTransaction } = require('../utils/bookingLock');
 const {
   chargeBookingFee,
   isBillingEnabled,
@@ -87,8 +89,6 @@ router.post('/', authMiddleware, async (req, res) => {
 
     const salonMasterResolved = await resolveTeamMasterId(req.masterId, salonMasterId);
     const durationMinutes = duration || 60;
-    const startMs = new Date(appointmentTime).getTime();
-    const endMs = startMs + durationMinutes * 60000;
 
     let clientId;
 
@@ -143,23 +143,6 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Укажите услугу' });
     }
 
-    const booked = await db.query(
-      `SELECT appointment_time, duration_minutes FROM appointments
-       WHERE salon_master_id = $1 AND status = 'confirmed'
-         AND DATE(appointment_time) = DATE($2::timestamptz)`,
-      [salonMasterResolved, appointmentTime]
-    );
-
-    const hasOverlap = booked.rows.some((b) => {
-      const bookedStart = new Date(b.appointment_time).getTime();
-      const bookedEnd = bookedStart + (b.duration_minutes || 60) * 60000;
-      return startMs < bookedEnd && endMs > bookedStart;
-    });
-
-    if (hasOverlap) {
-      return res.status(409).json({ error: 'Время уже занято' });
-    }
-
     if (isBillingEnabled()) {
       const billingRow = await getMasterBillingRow(req.masterId);
       const bookingCheck = evaluateOnlineBooking(billingRow);
@@ -172,11 +155,21 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     const appointmentId = uuidv4();
-    await db.query(
-      `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [appointmentId, req.masterId, salonMasterResolved, clientId, serviceName, servicePrice, appointmentTime, durationMinutes, clientNotes]
-    );
+    try {
+      await withBookingTransaction(db, async (client) => {
+        await assertSlotAvailable(client, salonMasterResolved, appointmentTime, durationMinutes);
+        await client.query(
+          `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [appointmentId, req.masterId, salonMasterResolved, clientId, serviceName, servicePrice, appointmentTime, durationMinutes, clientNotes]
+        );
+      });
+    } catch (lockErr) {
+      if (lockErr.status === 409) {
+        return res.status(409).json({ error: lockErr.message });
+      }
+      throw lockErr;
+    }
 
     try {
       await chargeBookingFee(req.masterId, appointmentId, { context: 'manual' });
@@ -191,6 +184,9 @@ router.post('/', authMiddleware, async (req, res) => {
 
     res.status(201).json({ success: true, appointmentId });
   } catch (error) {
+    if (error.status === 409) {
+      return res.status(409).json({ error: error.message });
+    }
     console.error('Error creating appointment:', error);
     res.status(500).json({ error: 'Ошибка при создании записи' });
   }
@@ -200,6 +196,7 @@ router.post('/', authMiddleware, async (req, res) => {
 router.get('/:id/contact', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
+    const scope = teamAppointmentFilter(req, 'a', 3);
     const result = await db.query(
       `SELECT COALESCE(NULLIF(scp.phone, ''), c.phone) AS client_phone,
               c.telegram_user_id,
@@ -212,8 +209,8 @@ router.get('/:id/contact', authMiddleware, async (req, res) => {
          ON scp.client_id = c.id
         AND scp.salon_id = a.master_id
         AND COALESCE(scp.deleted_at, 'epoch'::timestamp) = 'epoch'::timestamp
-       WHERE a.id = $1 AND a.master_id = $2`,
-      [id, req.masterId]
+       WHERE a.id = $1 AND a.master_id = $2${scope.sql}`,
+      [id, req.masterId, ...scope.params]
     );
 
     if (result.rows.length === 0) {
@@ -248,6 +245,35 @@ router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { serviceName, servicePrice, appointmentTime, duration, status, clientNotes, cancelReason } = req.body;
+
+    const scope = teamAppointmentFilter(req, 'a', 3);
+    const existing = await db.query(
+      `SELECT a.* FROM appointments a WHERE a.id = $1 AND a.master_id = $2${scope.sql}`,
+      [id, req.masterId, ...scope.params]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ error: 'Запись не найдена' });
+    }
+    const current = existing.rows[0];
+
+    if (appointmentTime && appointmentTime !== current.appointment_time && current.status === 'confirmed') {
+      try {
+        await withBookingTransaction(db, async (client) => {
+          await assertSlotAvailable(
+            client,
+            current.salon_master_id,
+            appointmentTime,
+            duration || current.duration_minutes || 60,
+            id
+          );
+        });
+      } catch (lockErr) {
+        if (lockErr.status === 409) {
+          return res.status(409).json({ error: lockErr.message });
+        }
+        throw lockErr;
+      }
+    }
 
     // Если меняем статус на отменён, получим данные для уведомления
     let clientData = null;
@@ -357,7 +383,14 @@ router.put('/:id', authMiddleware, async (req, res) => {
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.query('DELETE FROM appointments WHERE id = $1 AND master_id = $2', [id, req.masterId]);
+    const scope = teamAppointmentFilter(req, 'a', 3);
+    const result = await db.query(
+      `DELETE FROM appointments a WHERE a.id = $1 AND a.master_id = $2${scope.sql} RETURNING id`,
+      [id, req.masterId, ...scope.params]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: 'Запись не найдена' });
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при удалении записи' });
@@ -370,12 +403,13 @@ router.post('/:id/message', authMiddleware, async (req, res) => {
     const { id } = req.params;
     const { message } = req.body;
 
+    const scope = teamAppointmentFilter(req, 'a', 3);
     const appointment = await db.query(
       `SELECT c.max_user_id, c.telegram_user_id, c.messenger, a.service_name, a.appointment_time
        FROM appointments a
        JOIN clients c ON a.client_id = c.id
-       WHERE a.id = $1 AND a.master_id = $2`,
-      [id, req.masterId]
+       WHERE a.id = $1 AND a.master_id = $2${scope.sql}`,
+      [id, req.masterId, ...scope.params]
     );
 
     if (appointment.rows.length === 0) {

@@ -27,6 +27,9 @@ const {
   evaluateOnlineBooking,
   isBillingEnabled
 } = require('../utils/billing');
+const { requireInternalSecret } = require('../utils/internalAuth');
+const { signClientToken, requireClientAccess } = require('../utils/clientAuth');
+const { assertSlotAvailable, withBookingTransaction } = require('../utils/bookingLock');
 
 const router = express.Router();
 
@@ -44,7 +47,7 @@ const reviewPhotoUpload = multer({
 });
 
 // Синхронизация аватара из MAX/Telegram (вызывают боты при /start)
-router.post('/sync-avatar', async (req, res) => {
+router.post('/sync-avatar', requireInternalSecret, async (req, res) => {
   try {
     const { channel, userId, maxUserId, telegramUserId, photoUrl, name, username } = req.body;
     const messenger = normalizeChannel(channel);
@@ -119,7 +122,8 @@ router.post('/identify', async (req, res) => {
       messengerUserId,
       photoUrl
     });
-    res.json({ success: true, clientId });
+    const clientToken = signClientToken({ channel: messenger, userId: messengerUserId, masterId: salonId });
+    res.json({ success: true, clientId, clientToken });
   } catch (error) {
     console.error('Client identify error:', error);
     res.status(500).json({ error: 'Ошибка авторизации клиента' });
@@ -190,10 +194,16 @@ router.post('/auth/telegram', async (req, res) => {
       ok: true,
       channel: 'telegram',
       telegramUserId,
+      userId: telegramUserId,
       firstName: first_name || null,
       lastName: last_name || null,
       username: username || null,
-      photoUrl: photo_url || null
+      photoUrl: photo_url || null,
+      clientToken: signClientToken({
+        channel: 'telegram',
+        userId: telegramUserId,
+        masterId: resolvedMasterId
+      })
     });
   } catch (error) {
     console.error('Telegram auth error:', error);
@@ -283,7 +293,7 @@ router.post('/reviews', reviewPhotoUpload.array('photos', 3), async (req, res) =
 });
 
 // Чат с салоном (клиент)
-router.get('/:masterId/chat', async (req, res) => {
+router.get('/:masterId/chat', requireClientAccess, async (req, res) => {
   try {
     const salonId = resolveMasterId(req.params.masterId);
     const channel = normalizeChannel(req.query.channel);
@@ -301,7 +311,7 @@ router.get('/:masterId/chat', async (req, res) => {
   }
 });
 
-router.post('/:masterId/chat', async (req, res) => {
+router.post('/:masterId/chat', requireClientAccess, async (req, res) => {
   try {
     const salonId = resolveMasterId(req.params.masterId);
     const { channel, userId, maxUserId, telegramUserId, body, name } = req.body;
@@ -358,7 +368,7 @@ router.get('/:masterId/slots', async (req, res) => {
 });
 
 // Создать запись (channel: max | telegram)
-router.post('/book', async (req, res) => {
+router.post('/book', requireClientAccess, async (req, res) => {
   try {
     const {
       masterId,
@@ -396,25 +406,6 @@ router.post('/book', async (req, res) => {
     }
 
     const durationMinutes = duration || 60;
-    const startMs = new Date(appointmentTime).getTime();
-    const endMs = startMs + durationMinutes * 60000;
-
-    const booked = await db.query(
-      `SELECT appointment_time, duration_minutes FROM appointments
-       WHERE salon_master_id = $1 AND status = 'confirmed'
-         AND DATE(appointment_time) = DATE($2::timestamptz)`,
-      [salonMasterId, appointmentTime]
-    );
-
-    const hasOverlap = booked.rows.some((b) => {
-      const bookedStart = new Date(b.appointment_time).getTime();
-      const bookedEnd = bookedStart + (b.duration_minutes || 60) * 60000;
-      return startMs < bookedEnd && endMs > bookedStart;
-    });
-
-    if (hasOverlap) {
-      return res.status(409).json({ error: 'Время уже занято' });
-    }
 
     if (isBillingEnabled()) {
       const billingRow = await getMasterBillingRow(resolvedSalonId);
@@ -467,11 +458,21 @@ router.post('/book', async (req, res) => {
     });
 
     const appointmentId = uuidv4();
-    await db.query(
-      `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'confirmed')`,
-      [appointmentId, resolvedSalonId, salonMasterId, clientId, serviceName, servicePrice, appointmentTime, durationMinutes, clientNotes]
-    );
+    try {
+      await withBookingTransaction(db, async (client) => {
+        await assertSlotAvailable(client, salonMasterId, appointmentTime, durationMinutes);
+        await client.query(
+          `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'confirmed')`,
+          [appointmentId, resolvedSalonId, salonMasterId, clientId, serviceName, servicePrice, appointmentTime, durationMinutes, clientNotes]
+        );
+      });
+    } catch (lockErr) {
+      if (lockErr.status === 409) {
+        return res.status(409).json({ error: lockErr.message });
+      }
+      throw lockErr;
+    }
 
     try {
       await chargeOnlineBookingFee(resolvedSalonId, appointmentId);
@@ -492,7 +493,7 @@ router.post('/book', async (req, res) => {
 });
 
 // Данные записи клиента для переноса
-router.get('/appointment/:appointmentId', async (req, res) => {
+router.get('/appointment/:appointmentId', requireClientAccess, async (req, res) => {
   try {
     const { appointmentId } = req.params;
     const channel = normalizeChannel(req.query.channel);
@@ -523,7 +524,7 @@ router.get('/appointment/:appointmentId', async (req, res) => {
 });
 
 // Перенести запись клиента
-router.put('/appointment/:appointmentId/reschedule', async (req, res) => {
+router.put('/appointment/:appointmentId/reschedule', requireClientAccess, async (req, res) => {
   try {
     const { appointmentId } = req.params;
     const {
@@ -586,47 +587,43 @@ router.put('/appointment/:appointmentId/reschedule', async (req, res) => {
     }
 
     const durationMinutes = duration || 60;
-    const startMs = new Date(appointmentTime).getTime();
-    const endMs = startMs + durationMinutes * 60000;
 
-    const booked = await db.query(
-      `SELECT id, appointment_time, duration_minutes FROM appointments
-       WHERE salon_master_id = $1 AND status = 'confirmed'
-         AND id != $2
-         AND DATE(appointment_time) = DATE($3::timestamptz)`,
-      [resolvedSalonMasterId, appointmentId, appointmentTime]
-    );
-
-    const hasOverlap = booked.rows.some((b) => {
-      const bookedStart = new Date(b.appointment_time).getTime();
-      const bookedEnd = bookedStart + (b.duration_minutes || 60) * 60000;
-      return startMs < bookedEnd && endMs > bookedStart;
-    });
-
-    if (hasOverlap) {
-      return res.status(409).json({ error: 'Время уже занято' });
+    try {
+      await withBookingTransaction(db, async (client) => {
+        await assertSlotAvailable(
+          client,
+          resolvedSalonMasterId,
+          appointmentTime,
+          durationMinutes,
+          appointmentId
+        );
+        await client.query(
+          `UPDATE appointments
+           SET salon_master_id = $1,
+               service_name = $2,
+               service_price = $3,
+               appointment_time = $4,
+               duration_minutes = $5,
+               client_notes = $6
+           WHERE id = $7 AND client_id = $8`,
+          [
+            resolvedSalonMasterId,
+            serviceName,
+            servicePrice,
+            appointmentTime,
+            durationMinutes,
+            clientNotes || null,
+            appointmentId,
+            clientId
+          ]
+        );
+      });
+    } catch (lockErr) {
+      if (lockErr.status === 409) {
+        return res.status(409).json({ error: lockErr.message });
+      }
+      throw lockErr;
     }
-
-    await db.query(
-      `UPDATE appointments
-       SET salon_master_id = $1,
-           service_name = $2,
-           service_price = $3,
-           appointment_time = $4,
-           duration_minutes = $5,
-           client_notes = $6
-       WHERE id = $7 AND client_id = $8`,
-      [
-        resolvedSalonMasterId,
-        serviceName,
-        servicePrice,
-        appointmentTime,
-        durationMinutes,
-        clientNotes || null,
-        appointmentId,
-        clientId
-      ]
-    );
 
     res.json({ success: true, appointmentId });
   } catch (error) {
@@ -636,7 +633,7 @@ router.put('/appointment/:appointmentId/reschedule', async (req, res) => {
 });
 
 // Записи клиента: /my/:userId?channel=max|telegram
-router.get('/my/:userId', async (req, res) => {
+router.get('/my/:userId', requireClientAccess, async (req, res) => {
   try {
     const { userId } = req.params;
     const channel = normalizeChannel(req.query.channel);
@@ -664,7 +661,7 @@ router.get('/my/:userId', async (req, res) => {
 });
 
 // Отменить запись
-router.post('/cancel/:appointmentId', async (req, res) => {
+router.post('/cancel/:appointmentId', requireClientAccess, async (req, res) => {
   try {
     const { appointmentId } = req.params;
     const { channel, maxUserId, telegramUserId, userId } = req.body;

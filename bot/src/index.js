@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const { requireInternalSecret, internalAuthHeaders } = require('./internalAuth');
 
 const app = express();
 app.use(cors());
@@ -172,7 +173,7 @@ async function syncClientAvatar({ userId, photoUrl, name }) {
     await axios.post(
       `${API_BASE}/api/client/sync-avatar`,
       { channel: 'max', userId: String(userId), photoUrl: photoUrl || undefined, name },
-      { timeout: 15000 }
+      { timeout: 15000, headers: internalAuthHeaders() }
     );
   } catch (err) {
     console.error('MAX sync-avatar:', err.response?.data || err.message);
@@ -265,7 +266,8 @@ async function answerCallback(callbackId, notification) {
 
 async function fetchAppointments(userId) {
   const res = await axios.get(`${API_BASE}/api/client/my/${userId}`, {
-    params: { channel: 'max' }
+    params: { channel: 'max' },
+    headers: internalAuthHeaders()
   });
   return res.data;
 }
@@ -388,7 +390,7 @@ async function cancelAppointment(userId, appointmentId) {
   await axios.post(`${API_BASE}/api/client/cancel/${appointmentId}`, {
     channel: 'max',
     userId
-  });
+  }, { headers: internalAuthHeaders() });
 }
 
 async function relayClientMessageToSalonChat({ userId, userName, text }) {
@@ -402,7 +404,7 @@ async function relayClientMessageToSalonChat({ userId, userName, text }) {
       maxUserId: userId,
       name: userName || 'Клиент',
       body: text
-    });
+    }, { headers: internalAuthHeaders() });
     return true;
   } catch (err) {
     console.error('MAX relay chat error:', err.response?.data || err.message);
@@ -610,7 +612,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-app.post('/notify', async (req, res) => {
+app.post('/notify', requireInternalSecret, async (req, res) => {
   try {
     const { maxUserId, message, replyUrl, replyText } = req.body;
     if (!maxUserId || !message) {

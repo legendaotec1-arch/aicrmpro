@@ -72,6 +72,7 @@ services:
       context: ./bot
       dockerfile: Dockerfile
     container_name: crm_max_bot
+    env_file: .env
     environment:
       MAX_BOT_TOKEN: ${MAX_BOT_TOKEN}
       MAX_API_URL: ${MAX_API_URL:-https://platform-api.max.ru}
@@ -92,6 +93,7 @@ services:
       context: ./telegram-bot
       dockerfile: Dockerfile
     container_name: crm_max_telegram_bot
+    env_file: .env
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BACKEND_URL: ${BACKEND_URL:-http://backend:3000}
