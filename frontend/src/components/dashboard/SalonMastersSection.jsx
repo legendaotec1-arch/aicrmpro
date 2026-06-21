@@ -10,6 +10,7 @@ import { mediaUrl } from '../../lib/media';
 const emptyForm = {
   id: null,
   name: '',
+  last_name: '',
   specialty: '',
   description: '',
   slot_step_minutes: 60,
@@ -42,6 +43,7 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
       setForm({
         id: m.id,
         name: m.name,
+        last_name: m.last_name || '',
         specialty: m.specialty || '',
         description: m.description || '',
         slot_step_minutes: m.slot_step_minutes || 60,
@@ -93,6 +95,7 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
     try {
       const payload = {
         name: form.name.trim(),
+        last_name: form.last_name.trim() || null,
         specialty: form.specialty || null,
         description: form.description || null,
         slot_step_minutes: Number(form.slot_step_minutes) || 60,
@@ -193,7 +196,7 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold text-admin-text">{m.name}</p>
+                <p className="truncate font-semibold text-admin-text">{[m.last_name, m.name].filter(Boolean).join(' ') || m.name}</p>
                 {m.specialty && <p className="truncate text-xs text-admin-textMuted">{m.specialty}</p>}
                 <p className="mt-1 text-[11px] text-admin-textMuted">
                   {m.slot_step_minutes} мин · {m.commission_percent ?? 0}%
@@ -251,18 +254,26 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
                 <input type="file" accept="image/*" className="sr-only" onChange={handlePhotoChange} />
               </label>
               <div className="min-w-0 flex-1 space-y-3">
-                <Input
-                  label="Имя"
-                  required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Анна"
-                />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="Имя"
+                    required
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="Анна"
+                  />
+                  <Input
+                    label="Фамилия"
+                    value={form.last_name}
+                    onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                    placeholder="Иванова"
+                  />
+                </div>
                 <Input
                   label="Специализация"
                   value={form.specialty}
                   onChange={(e) => setForm({ ...form, specialty: e.target.value })}
-                  placeholder="Стилист"
+                  placeholder="Маникюр · педикюр"
                 />
               </div>
             </div>

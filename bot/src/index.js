@@ -9,11 +9,18 @@ app.use(express.json());
 
 const MAX_API_URL = (process.env.MAX_API_URL || 'https://platform-api.max.ru').replace(/\/$/, '');
 const BOT_TOKEN = process.env.MAX_BOT_TOKEN || process.env.BOT_TOKEN;
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+const API_BASE = resolveApiBase(BACKEND_URL, PUBLIC_URL);
 const WEBHOOK_SECRET = process.env.MAX_WEBHOOK_SECRET || '';
 const WEBHOOK_URL = process.env.MAX_WEBHOOK_URL || '';
 const PORT = process.env.PORT || 3001;
+
+function resolveApiBase(backendUrl, publicUrl) {
+  if (process.env.BOT_API_URL) return process.env.BOT_API_URL.replace(/\/$/, '');
+  if (/^https?:\/\/backend(?::|$)/i.test(backendUrl) && publicUrl) return publicUrl;
+  return backendUrl;
+}
 
 const lastMasterByUser = new Map();
 // Дедупликация webhook от MAX (они дублируют bot_started)
@@ -56,6 +63,12 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;');
 }
 
+function truncateText(text, max = 600) {
+  const s = String(text || '').trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trim()}…`;
+}
+
 function inlineKeyboard(buttonRows) {
   // MAX API: inlineKeyboard принимает массив строк кнопок
   // Каждая кнопка — объект с type, text, и параметрами
@@ -95,7 +108,8 @@ function appointmentKeyboard(apt, userId, fallbackMasterIdEncoded) {
 
 function formatMasterCard(card) {
   const lines = [`✨ ${card.title}`];
-  if (card.description) lines.push('', `🛠 ${card.description}`);
+  const desc = truncateText(card.description, 600);
+  if (desc) lines.push('', `🛠 ${desc}`);
   lines.push(
     '',
     '👇 Что можно сделать:',
@@ -140,7 +154,7 @@ function parseStartRef(payloadOrText) {
 }
 
 async function fetchMasterCard(masterIdEncoded) {
-  const res = await axios.get(`${BACKEND_URL}/api/master/${masterIdEncoded}`);
+  const res = await axios.get(`${API_BASE}/api/master/${masterIdEncoded}`);
   const master = res.data?.master || {};
   return {
     title:
@@ -156,7 +170,7 @@ async function syncClientAvatar({ userId, photoUrl, name }) {
   if (!userId) return;
   try {
     await axios.post(
-      `${BACKEND_URL}/api/client/sync-avatar`,
+      `${API_BASE}/api/client/sync-avatar`,
       { channel: 'max', userId: String(userId), photoUrl: photoUrl || undefined, name },
       { timeout: 15000 }
     );
@@ -250,7 +264,7 @@ async function answerCallback(callbackId, notification) {
 }
 
 async function fetchAppointments(userId) {
-  const res = await axios.get(`${BACKEND_URL}/api/client/my/${userId}`, {
+  const res = await axios.get(`${API_BASE}/api/client/my/${userId}`, {
     params: { channel: 'max' }
   });
   return res.data;
@@ -314,26 +328,31 @@ async function replyMasterCard(userId, encoded, user) {
   lastMasterByUser.set(userId, encoded);
   syncClientAvatar({ userId, photoUrl: maxPhotoFrom(user), name: user?.name }).catch(() => {});
 
+  let card;
   try {
-    const card = await fetchMasterCard(encoded);
+    card = await fetchMasterCard(encoded);
     card.encoded = encoded;
     console.log('replyMasterCard fetched:', { title: card.title, description: card.description?.slice(0, 100), hasPhoto: !!card.photoUrl });
-
-    if (card.photoUrl) {
-      // Фото есть — отправляем всё в одном сообщении
-      await sendMaxCardWithPhoto(userId, card, url);
-    } else {
-      // Фото нет — просто текст + кнопки
-      await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, encoded));
-    }
   } catch (err) {
-    console.error('MAX master card error:', err.message);
+    console.error('MAX fetch master card error:', err.message);
     await sendMaxMessage(
       userId,
       'Запись к мастеру\n\nДля записи нажмите кнопку «Записаться».',
       bookingKeyboard(url, encoded)
     );
+    return;
   }
+
+  if (card.photoUrl) {
+    try {
+      await sendMaxCardWithPhoto(userId, card, url);
+      return;
+    } catch (photoErr) {
+      console.error('MAX photo send error:', photoErr.message);
+    }
+  }
+
+  await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, encoded));
 }
 
 async function replyMyBookings(userId, masterIdEncoded = null) {
@@ -366,7 +385,7 @@ async function replyMyBookings(userId, masterIdEncoded = null) {
 }
 
 async function cancelAppointment(userId, appointmentId) {
-  await axios.post(`${BACKEND_URL}/api/client/cancel/${appointmentId}`, {
+  await axios.post(`${API_BASE}/api/client/cancel/${appointmentId}`, {
     channel: 'max',
     userId
   });
@@ -377,7 +396,7 @@ async function relayClientMessageToSalonChat({ userId, userName, text }) {
   if (!encodedMasterId) return false;
 
   try {
-    await axios.post(`${BACKEND_URL}/api/client/${encodedMasterId}/chat`, {
+    await axios.post(`${API_BASE}/api/client/${encodedMasterId}/chat`, {
       channel: 'max',
       userId,
       maxUserId: userId,

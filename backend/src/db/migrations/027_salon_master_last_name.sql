@@ -1,0 +1,1 @@
+ALTER TABLE salon_masters ADD COLUMN IF NOT EXISTS last_name VARCHAR(255);

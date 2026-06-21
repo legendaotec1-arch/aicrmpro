@@ -14,8 +14,13 @@ const EDGE_OFFSET_BOTTOM_DESKTOP = '32px';
 export default function MasterVideoReel({ src, title = 'Видеовизитка' }) {
   const videoRef = useRef(null);
   const [expanded, setExpanded] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const videoSrc = mediaUrl(src);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [videoSrc]);
 
   const applyMiniMode = useCallback(() => {
     const v = videoRef.current;
@@ -59,7 +64,7 @@ export default function MasterVideoReel({ src, title = 'Видеовизитка
     setExpanded(false);
   };
 
-  if (!src) return null;
+  if (!src || !videoSrc || failed) return null;
 
   return (
     <>
@@ -132,12 +137,15 @@ export default function MasterVideoReel({ src, title = 'Видеовизитка
         >
           <video
             ref={videoRef}
+            key={videoSrc}
             src={videoSrc}
             muted={!expanded}
             loop={!expanded}
             playsInline
             autoPlay
+            preload="auto"
             controls={expanded}
+            onError={() => setFailed(true)}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
 

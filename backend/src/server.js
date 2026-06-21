@@ -33,8 +33,11 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static files for uploads
+// Static files for uploads; missing files → 404 (не index.html SPA)
 app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', (_req, res) => {
+  res.status(404).json({ error: 'File not found' });
+});
 
 // Serve static files from frontend build
 app.use(express.static(frontendDist));

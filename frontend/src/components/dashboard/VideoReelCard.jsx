@@ -36,6 +36,36 @@ function validateVideoFile(file) {
   });
 }
 
+function VideoReelPreview({ videoUrl }) {
+  const [failed, setFailed] = useState(false);
+  const src = mediaUrl(videoUrl);
+
+  if (failed) {
+    return (
+      <div className="relative w-[108px] shrink-0 rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50 px-3 py-4 text-center">
+        <p className="text-[11px] font-semibold text-amber-800">Файл не найден</p>
+        <p className="mt-1 text-[10px] text-amber-700 leading-snug">Загрузите видео заново</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-[108px] shrink-0 rounded-2xl overflow-hidden border-2 border-admin-accent/40 shadow-lg shadow-admin-accent/20">
+      <video
+        key={src}
+        src={src}
+        className="w-full aspect-[9/16] object-cover bg-black"
+        muted
+        loop
+        playsInline
+        autoPlay
+        preload="auto"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 export default function VideoReelCard({ api, toast, videoUrl, onChanged }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -101,16 +131,7 @@ export default function VideoReelCard({ api, toast, videoUrl, onChanged }) {
         </div>
       ) : videoUrl ? (
         <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <div className="relative w-[108px] shrink-0 rounded-2xl overflow-hidden border-2 border-admin-accent/40 shadow-lg shadow-admin-accent/20">
-            <video
-              src={mediaUrl(videoUrl)}
-              className="w-full aspect-[9/16] object-cover bg-black"
-              muted
-              loop
-              playsInline
-              autoPlay
-            />
-          </div>
+          <VideoReelPreview videoUrl={videoUrl} />
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="secondary" size="sm" onClick={handlePick}>
               <Upload className="h-4 w-4" />

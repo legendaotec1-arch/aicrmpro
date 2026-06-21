@@ -58,6 +58,7 @@ const {
   buildBookingLink,
   DEFAULT_MESSAGE
 } = require('../utils/repeatInvite');
+const { sanitizeMasterMediaRow } = require('../utils/mediaResolve');
 const { queryWithColumnFallback } = require('../utils/safeQuery');
 const { buildClientContactInfo, buildClientPhoneFields, buildClientChannelFields } = require('../utils/clientContact');
 const {
@@ -124,6 +125,7 @@ router.post('/me/salon-masters', authMiddleware, requireOwner, async (req, res) 
   try {
     const {
       name,
+      last_name,
       specialty,
       description,
       slot_step_minutes,
@@ -162,14 +164,15 @@ router.post('/me/salon-masters', authMiddleware, requireOwner, async (req, res) 
     const id = uuidv4();
     await db.query(
       `INSERT INTO salon_masters (
-         id, salon_id, name, specialty, description, photo_url, slot_step_minutes, sort_order, is_active,
+         id, salon_id, name, last_name, specialty, description, photo_url, slot_step_minutes, sort_order, is_active,
          email, password_hash, commission_percent
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         id,
         req.masterId,
         name.trim(),
+        last_name?.trim() || null,
         specialty || null,
         description || null,
         photo_url || null,
@@ -195,6 +198,7 @@ router.put('/me/salon-masters/:id', authMiddleware, requireOwner, async (req, re
 
     const {
       name,
+      last_name,
       specialty,
       description,
       slot_step_minutes,
@@ -237,18 +241,20 @@ router.put('/me/salon-masters/:id', authMiddleware, requireOwner, async (req, re
     await db.query(
       `UPDATE salon_masters SET
         name = COALESCE($1, name),
-        specialty = COALESCE($2, specialty),
-        description = COALESCE($3, description),
-        photo_url = COALESCE($4, photo_url),
-        slot_step_minutes = COALESCE($5, slot_step_minutes),
-        sort_order = COALESCE($6, sort_order),
-        is_active = COALESCE($7, is_active),
-        email = COALESCE($8, email),
-        password_hash = COALESCE($9, password_hash),
-        commission_percent = COALESCE($10, commission_percent)
-       WHERE id = $11 AND salon_id = $12`,
+        last_name = COALESCE($2, last_name),
+        specialty = COALESCE($3, specialty),
+        description = COALESCE($4, description),
+        photo_url = COALESCE($5, photo_url),
+        slot_step_minutes = COALESCE($6, slot_step_minutes),
+        sort_order = COALESCE($7, sort_order),
+        is_active = COALESCE($8, is_active),
+        email = COALESCE($9, email),
+        password_hash = COALESCE($10, password_hash),
+        commission_percent = COALESCE($11, commission_percent)
+       WHERE id = $12 AND salon_id = $13`,
       [
         name,
+        last_name,
         specialty,
         description,
         photo_url,
@@ -389,7 +395,7 @@ router.get('/:masterId', async (req, res) => {
       [masterId]
     );
 
-    const masterRow = master.rows[0];
+    const masterRow = sanitizeMasterMediaRow(master.rows[0]);
     const socialLinks = buildSocialLinksFromRow(masterRow);
     let billingState = null;
     if (isBillingEnabled()) {
@@ -464,7 +470,7 @@ router.get('/me/profile', authMiddleware, requireOwner, async (req, res) => {
       return res.status(404).json({ error: 'Мастер не найден' });
     }
 
-    const row = result.rows[0];
+    const row = sanitizeMasterMediaRow(result.rows[0]);
     res.json({
       ...row,
       client_theme: normalizeClientTheme(row.client_theme)

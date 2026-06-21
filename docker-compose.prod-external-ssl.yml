@@ -33,7 +33,7 @@ services:
       UPLOADS_DIR: /app/uploads
       FRONTEND_DIST: /app/frontend/dist
     volumes:
-      - uploads_data:/app/uploads
+      - app_uploads:/app/uploads
       - ./frontend/dist:/app/frontend/dist:ro
     depends_on:
       postgres:
@@ -88,7 +88,8 @@ services:
 
 volumes:
   postgres_data:
-  uploads_data:
+  app_uploads:
+    name: aicrmpro_aicrmpro_uploads_data
 
 networks:
   app:

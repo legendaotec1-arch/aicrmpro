@@ -32,7 +32,7 @@ services:
       UPLOADS_DIR: /app/uploads
       FRONTEND_DIST: /app/frontend/dist
     volumes:
-      - uploads_data:/app/uploads
+      - app_uploads:/app/uploads
       - ./frontend/dist:/app/frontend/dist:ro
     depends_on:
       postgres:
@@ -49,6 +49,8 @@ services:
     env_file: .env
     environment:
       BACKEND_URL: http://backend:3000
+      BOT_API_URL: ${PUBLIC_URL}
+      PUBLIC_URL: ${PUBLIC_URL}
       MAX_API_URL: ${MAX_API_URL:-https://platform-api.max.ru}
       MAX_WEBHOOK_URL: ${MAX_WEBHOOK_URL:-}
       MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:-}
@@ -65,6 +67,8 @@ services:
     env_file: .env
     environment:
       BACKEND_URL: http://backend:3000
+      BOT_API_URL: ${PUBLIC_URL}
+      PUBLIC_URL: ${PUBLIC_URL}
       PORT: 3002
     networks: [app]
 
@@ -109,7 +113,8 @@ services:
 
 volumes:
   postgres_data:
-  uploads_data:
+  app_uploads:
+    name: aicrmpro_aicrmpro_uploads_data
   caddy_data:
   caddy_config:
 

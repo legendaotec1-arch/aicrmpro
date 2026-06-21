@@ -1,18 +1,31 @@
+import { useEffect, useState } from 'react';
 import { mediaUrl } from '../../lib/media';
 
 function MasterAvatar({ master, size = 'md' }) {
+  const [failed, setFailed] = useState(false);
   const sizes = {
     sm: 'h-8 w-8 text-sm',
     md: 'h-12 w-12 text-lg',
     lg: 'h-16 w-16 text-xl'
   };
   const cls = sizes[size] || sizes.md;
+  const src = master?.photo_url && !failed ? mediaUrl(master.photo_url) : null;
+
+  useEffect(() => {
+    setFailed(false);
+  }, [master?.id, master?.photo_url]);
+
   return (
     <div
       className={`${cls} shrink-0 overflow-hidden rounded-full bg-admin-accent flex items-center justify-center`}
     >
-      {master.photo_url ? (
-        <img src={mediaUrl(master.photo_url)} alt={master.name} className="h-full w-full object-cover" />
+      {src ? (
+        <img
+          src={src}
+          alt={master.name}
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
       ) : (
         <span className={`font-bold text-white ${size === 'sm' ? 'text-xs' : ''}`}>
           {master.name?.[0] || '?'}

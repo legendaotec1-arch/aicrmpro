@@ -9,9 +9,16 @@ app.use(cors());
 app.use(express.json());
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
+const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'http://localhost:5173').replace(/\/$/, '');
+const API_BASE = resolveApiBase(BACKEND_URL, PUBLIC_URL);
 const PORT = process.env.PORT || 3002;
+
+function resolveApiBase(backendUrl, publicUrl) {
+  if (process.env.BOT_API_URL) return process.env.BOT_API_URL.replace(/\/$/, '');
+  if (/^https?:\/\/backend(?::|$)/i.test(backendUrl) && publicUrl) return publicUrl;
+  return backendUrl;
+}
 
 if (!BOT_TOKEN) {
   console.error('TELEGRAM_BOT_TOKEN не задан');
@@ -52,7 +59,7 @@ function escapeHtml(value) {
 }
 
 async function fetchMasterCard(masterIdEncoded) {
-  const res = await axios.get(`${BACKEND_URL}/api/master/${masterIdEncoded}`);
+  const res = await axios.get(`${API_BASE}/api/master/${masterIdEncoded}`);
   const master = res.data?.master || {};
   return {
     title: master.display_title
@@ -90,9 +97,15 @@ function appointmentKeyboard(apt, userId, fallbackMasterIdEncoded) {
   ]);
 }
 
+function truncateText(text, max = 600) {
+  const s = String(text || '').trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trim()}…`;
+}
+
 function formatMasterCard(card) {
   const lines = [`✨ <b>${escapeHtml(card.title)}</b>`];
-  if (card.description) lines.push('', `🛠 ${escapeHtml(card.description)}`);
+  if (card.description) lines.push('', `🛠 ${escapeHtml(truncateText(card.description))}`);
   lines.push(
     '',
     '👇 <b>Что можно сделать:</b>',
@@ -116,29 +129,38 @@ async function replyMasterCard(ctx, encoded) {
   const url = buildBookingUrl(encoded, userId);
   lastMasterByUser.set(userId, encoded);
 
+  let card;
   try {
-    const card = await fetchMasterCard(encoded);
-    const message = formatMasterCard(card);
-
-    if (card.photoUrl) {
-      await ctx.replyWithPhoto(card.photoUrl, {
-        caption: message,
-        parse_mode: 'HTML',
-        ...bookingKeyboard(url, encoded)
-      });
-    } else {
-      await ctx.reply(message, {
-        parse_mode: 'HTML',
-        ...bookingKeyboard(url, encoded)
-      });
-    }
+    card = await fetchMasterCard(encoded);
   } catch (err) {
-    console.error('Telegram master card error:', err.message);
+    console.error('Telegram fetch master card error:', err.message);
     await ctx.reply(
       'Запись к мастеру\n\nДля записи нажмите кнопку «Записаться».',
       bookingKeyboard(url, encoded)
     );
+    return;
   }
+
+  const message = formatMasterCard(card);
+  const keyboard = bookingKeyboard(url, encoded);
+
+  if (card.photoUrl) {
+    try {
+      await ctx.replyWithPhoto(card.photoUrl, {
+        caption: message,
+        parse_mode: 'HTML',
+        ...keyboard
+      });
+      return;
+    } catch (photoErr) {
+      console.error('Telegram photo send error:', photoErr.message);
+    }
+  }
+
+  await ctx.reply(message, {
+    parse_mode: 'HTML',
+    ...keyboard
+  });
 }
 
 function parseStartPayload(text) {
@@ -169,7 +191,7 @@ async function syncClientAvatar(ctx) {
   const name = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ').trim() || null;
   try {
     await axios.post(
-      `${BACKEND_URL}/api/client/sync-avatar`,
+      `${API_BASE}/api/client/sync-avatar`,
       {
         channel: 'telegram',
         userId,
@@ -185,7 +207,7 @@ async function syncClientAvatar(ctx) {
 }
 
 async function fetchAppointments(userId) {
-  const res = await axios.get(`${BACKEND_URL}/api/client/my/${userId}`, {
+  const res = await axios.get(`${API_BASE}/api/client/my/${userId}`, {
     params: { channel: 'telegram' }
   });
   return res.data;
@@ -252,7 +274,7 @@ bot.action(/^cancel_apt:(.+)$/, async (ctx) => {
   const appointmentId = ctx.match[1];
   const userId = ctx.from.id.toString();
   try {
-    await axios.post(`${BACKEND_URL}/api/client/cancel/${appointmentId}`, {
+    await axios.post(`${API_BASE}/api/client/cancel/${appointmentId}`, {
       channel: 'telegram',
       userId
     });
@@ -291,7 +313,7 @@ bot.hears(/^\/cancel_(.+)$/, async (ctx) => {
   const appointmentId = ctx.match[1];
   const userId = ctx.from.id.toString();
   try {
-    await axios.post(`${BACKEND_URL}/api/client/cancel/${appointmentId}`, {
+    await axios.post(`${API_BASE}/api/client/cancel/${appointmentId}`, {
       channel: 'telegram',
       userId
     });
@@ -301,7 +323,7 @@ bot.hears(/^\/cancel_(.+)$/, async (ctx) => {
   }
 });
 
-bot.launch().then(() => console.log('Telegram bot (polling) запущен'));
+bot.launch().then(() => console.log(`Telegram bot (polling) запущен, API_BASE=${API_BASE}`));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

@@ -3,6 +3,8 @@ import { ChevronDown, Clock } from 'lucide-react';
 import FullscreenImageViewer from './FullscreenImageViewer';
 import { formatServicePrice } from '../../lib/format';
 import { mediaUrl } from '../../lib/media';
+import { formatSalonMasterName } from '../../lib/masterDisplay';
+import SalonMasterAvatar from './SalonMasterAvatar';
 
 const PREMIUM = {
   bgCard: 'rgba(255, 255, 255, 0.92)',
@@ -188,36 +190,17 @@ export default function ClientHomeServices({ priceGroups, pickService, onBook })
                 }
               }}
             >
-              {group.master.photo_url ? (
-                <img
-                  src={mediaUrl(group.master.photo_url)}
-                  alt=""
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '6px',
-                    objectFit: 'cover',
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '6px',
-                    background: activeGroupIndex === idx ? 'rgba(255,255,255,0.2)' : PREMIUM.accentSoft,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    color: activeGroupIndex === idx ? '#FFFFFF' : PREMIUM.accent,
-                  }}
-                >
-                  {group.master.name?.[0] || '?'}
-                </div>
-              )}
-              {group.master.name}
+              <SalonMasterAvatar
+                master={group.master}
+                size={24}
+                radius={6}
+                fallbackStyle={{
+                  background: activeGroupIndex === idx ? 'rgba(255,255,255,0.2)' : PREMIUM.accentSoft,
+                  color: activeGroupIndex === idx ? '#FFFFFF' : PREMIUM.accent,
+                  fontSize: 11
+                }}
+              />
+              {formatSalonMasterName(group.master)}
             </button>
           ))}
         </div>

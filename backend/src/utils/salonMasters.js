@@ -1,13 +1,14 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const { queryWithColumnFallback } = require('./safeQuery');
+const { sanitizeSalonMasterRow } = require('./mediaResolve');
 
 async function listSalonMasters(salonId, { activeOnly = false } = {}) {
   let q = `SELECT * FROM salon_masters WHERE salon_id = $1`;
   if (activeOnly) q += ` AND is_active = TRUE`;
   q += ` ORDER BY sort_order, name`;
   const result = await db.query(q, [salonId]);
-  return result.rows;
+  return result.rows.map(sanitizeSalonMasterRow);
 }
 
 async function getSalonMasterById(salonMasterId, salonId) {
@@ -55,6 +56,7 @@ async function getPriceGroupsForSalon(salonId) {
       master: {
         id: m.id,
         name: m.name,
+        last_name: m.last_name,
         specialty: m.specialty,
         photo_url: m.photo_url,
         description: m.description,

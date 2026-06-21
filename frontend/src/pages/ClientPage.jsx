@@ -37,7 +37,8 @@ import { DEFAULT_CLIENT_THEME } from '../config/clientThemes';
 import AddressMap from '../components/maps/AddressMap';
 import PhoneRuInput from '../components/ui/PhoneRuInput';
 import { formatDateTime, formatPrice } from '../lib/format';
-import { formatMasterPublicTitle } from '../lib/masterDisplay';
+import { formatMasterPublicTitle, formatSalonMasterName } from '../lib/masterDisplay';
+import SalonMasterAvatar from '../components/client/SalonMasterAvatar';
 import { isRuPhoneComplete, normalizeRuPhoneForStorage } from '../lib/phoneRu';
 import { canSubmitBooking, getClientNameError, isValidClientName } from '../lib/clientBooking';
 import { mediaUrl } from '../lib/media';
@@ -104,6 +105,8 @@ const CLIENT_TABS = [
   { id: 'appointments', label: 'Мои записи', Icon: ListChecks },
   { id: 'reviews', label: 'Отзывы', Icon: Star }
 ];
+
+const BOOKING_STEPS = ['master', 'service', 'datetime', 'confirm'];
 
 // ============================================================
 // PREMIUM CARD COMPONENT
@@ -652,11 +655,12 @@ export default function ClientPage() {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
-  const [step, setStep] = useState('service');
+  const [step, setStep] = useState('master');
   const [confirmDialog, setConfirmDialog] = useState(null); // { type: 'cancel'|'reschedule', appointment }
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [formData, setFormData] = useState({ name: '', phone: '+7' });
   const bookingFormRef = useRef(null);
+  const reschedulePrefillRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [booking, setBooking] = useState(false);
@@ -680,9 +684,9 @@ export default function ClientPage() {
 
     if (tab && CLIENT_TABS.some((item) => item.id === tab)) setActiveTab(tab);
     if (reschedule) {
-      setRescheduleId(reschedule);
+      setRescheduleId((prev) => (prev === reschedule ? prev : reschedule));
       setActiveTab('booking');
-      setStep('service');
+      setStep('master');
     }
 
     if (uid && (ch === 'max' || ch === 'telegram')) {
@@ -694,7 +698,11 @@ export default function ClientPage() {
       };
       setClientSession(masterId, session);
       setClientAuth(session);
-      setSearchParams({}, { replace: true });
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        ['ch', 'uid', 'fn', 'photo'].forEach((key) => next.delete(key));
+        return next;
+      }, { replace: true });
       return session;
     }
 
@@ -709,8 +717,6 @@ export default function ClientPage() {
       const groups = res.data.priceGroups || [];
       const masters = res.data.teamMasters || [];
       const flat = res.data.priceList || groups.flatMap((g) => g.services);
-      const firstMaster = masters[0] || null;
-      const firstServices = groups.find((g) => g.master.id === firstMaster?.id)?.services || flat;
 
       setMaster((() => {
         const m = res.data.master;
@@ -726,8 +732,6 @@ export default function ClientPage() {
       setPriceGroups(groups);
       setTeamMasters(masters);
       setPriceList(flat);
-      setSelectedSalonMaster((prev) => prev || firstMaster);
-      if (!selectedService && firstServices?.length === 1) setSelectedService(firstServices[0]);
       setReviewSummary(res.data.reviewSummary || { count: 0, average: null });
       setReviews(res.data.reviews || []);
     } catch (err) {
@@ -737,7 +741,7 @@ export default function ClientPage() {
     } finally {
       setLoading(false);
     }
-  }, [masterId, selectedService]);
+  }, [masterId]);
 
   const loadAppointments = useCallback(async () => {
     if (!clientAuth) return;
@@ -795,7 +799,21 @@ export default function ClientPage() {
   }, [clientAuth, masterId, formData.name, formData.phone]);
 
   useEffect(() => {
-    if (!rescheduleId || !clientAuth || !master || teamMasters.length === 0) return;
+    reschedulePrefillRef.current = null;
+  }, [masterId]);
+
+  useEffect(() => {
+    if (activeTab !== 'booking' || step !== 'master' || rescheduleId || rescheduleLoading) return;
+    if (teamMasters.length === 1 && !selectedSalonMaster) {
+      pickSalonMaster(teamMasters[0]);
+    }
+  }, [activeTab, step, teamMasters, selectedSalonMaster, rescheduleId, rescheduleLoading]);
+
+  useEffect(() => {
+    if (!rescheduleId || !clientAuth || !master?.id || teamMasters.length === 0) return;
+    if (reschedulePrefillRef.current === rescheduleId) return;
+    if (priceGroups.length === 0 && priceList.length === 0) return;
+
     let cancelled = false;
     (async () => {
       setRescheduleLoading(true);
@@ -818,16 +836,24 @@ export default function ClientPage() {
         setSelectedDate(new Date(apt.appointment_time));
         setSelectedSlot(null);
         setActiveTab('booking');
-        setStep('service');
+        setStep('datetime');
+        reschedulePrefillRef.current = rescheduleId;
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('reschedule');
+          next.delete('tab');
+          return next;
+        }, { replace: true });
       } catch (err) {
         alert(err.response?.data?.error || 'Не удалось загрузить запись для переноса');
         setRescheduleId(null);
+        reschedulePrefillRef.current = null;
       } finally {
         if (!cancelled) setRescheduleLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [rescheduleId, clientAuth, master, teamMasters, priceGroups, priceList]);
+  }, [rescheduleId, clientAuth, master?.id, teamMasters, priceGroups, priceList, setSearchParams]);
 
   const handleAuthenticated = useCallback((session) => {
     setClientSession(masterId, session);
@@ -857,9 +883,10 @@ export default function ClientPage() {
   };
 
   const servicesForMaster = useMemo(() => {
-    if (!selectedSalonMaster) return priceList;
+    if (!selectedSalonMaster) return [];
     const group = priceGroups.find((g) => g.master.id === selectedSalonMaster.id);
-    return group?.services?.length ? group.services : priceList;
+    if (group?.services?.length) return group.services;
+    return priceGroups.length === 0 ? priceList : [];
   }, [priceGroups, selectedSalonMaster, priceList]);
 
   const mediaItems = useMemo(() => portfolio.filter((p) => p.image_url || p.video_url), [portfolio]);
@@ -893,9 +920,15 @@ export default function ClientPage() {
     if (masterRow) setSelectedSalonMaster(masterRow);
     setSelectedService(item);
     setSelectedSlot(null);
-    setStep('master');
+    setStep('datetime');
     setActiveTab('booking');
     setTimeout(() => document.getElementById('booking-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+
+  const selectBookingService = (item) => {
+    setSelectedService(item);
+    setSelectedSlot(null);
+    setStep('datetime');
   };
 
   useEffect(() => {
@@ -971,13 +1004,13 @@ export default function ClientPage() {
     setConfirmDialog(null);
     setRescheduleId(apt.id);
     setActiveTab('booking');
-    setStep('service');
+    setStep('master');
   };
 
   const handleSwitchAccount = () => {
     clearClientSession(masterId);
     setClientAuth(null);
-    setStep('service');
+    setStep('master');
     setSelectedSlot(null);
   };
 
@@ -1217,7 +1250,7 @@ export default function ClientPage() {
               videoItems={videoItems}
               priceGroups={priceGroups}
               showMap={showMap}
-              onBook={() => setActiveTab('booking')}
+              onBook={() => { setActiveTab('booking'); setStep('master'); }}
               onAppointments={() => setActiveTab('appointments')}
               pickService={pickService}
               openMedia={openMedia}
@@ -1279,15 +1312,12 @@ export default function ClientPage() {
                     <PremiumCard key={apt.id} style={{ padding: '20px' }}>
                       {/* Master photo + service info */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
-                        <div style={{ width: 64, height: 64, borderRadius: '18px', overflow: 'hidden', flexShrink: 0, boxShadow: PREMIUM.shadowAvatar }}>
-                          {aptMaster?.photo_url ? (
-                            <img src={mediaUrl(aptMaster.photo_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: '700', background: PREMIUM.accentSoft, color: PREMIUM.accent }}>
-                              {aptMaster?.name?.[0] || 'М'}
-                            </div>
-                          )}
-                        </div>
+                        <SalonMasterAvatar
+                          master={aptMaster}
+                          size={64}
+                          shadow={PREMIUM.shadowAvatar}
+                          fallbackStyle={{ background: PREMIUM.accentSoft, color: PREMIUM.accent }}
+                        />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <p style={{ fontSize: '15px', fontWeight: '700', color: PREMIUM.textPrimary }}>{apt.service_name}</p>
                           <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>{aptMaster?.name}</p>
@@ -1435,16 +1465,17 @@ export default function ClientPage() {
                   <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginBottom: '32px' }}>
                     Напоминание в <MessengerLabel channel={clientAuth.channel} size="xs" />
                   </p>
-                  <PremiumCtaBtn onClick={() => { setActiveTab('appointments'); setRescheduleId(null); setStep('service'); setSelectedSlot(null); setSelectedService(null); loadAppointments(); }}>
+                  <PremiumCtaBtn onClick={() => { setActiveTab('appointments'); setRescheduleId(null); setStep('master'); setSelectedSlot(null); setSelectedService(null); loadAppointments(); }}>
                     <ListChecks size={20} />
                     Мои записи
                   </PremiumCtaBtn>
                   <PremiumSecondaryBtn
                     onClick={() => {
                       setRescheduleId(null);
-                      setStep('service');
+                      setStep('master');
                       setSelectedSlot(null);
                       setSelectedService(null);
+                      setSelectedSalonMaster(null);
                       loadAppointments();
                     }}
                     style={{ maxWidth: 300, margin: '12px auto 0' }}
@@ -1455,11 +1486,10 @@ export default function ClientPage() {
               ) : (
                 <>
                   {/* Step progress indicator */}
-                  {['service', 'master', 'datetime', 'confirm'].includes(step) && (
+                  {BOOKING_STEPS.includes(step) && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px' }}>
-                      {['service', 'master', 'datetime', 'confirm'].map((s, idx) => {
-                        const steps = ['service', 'master', 'datetime', 'confirm'];
-                        const currentIdx = steps.indexOf(step);
+                      {BOOKING_STEPS.map((s, idx) => {
+                        const currentIdx = BOOKING_STEPS.indexOf(step);
                         const isCompleted = idx < currentIdx;
                         const isCurrent = idx === currentIdx;
                         return (
@@ -1489,7 +1519,7 @@ export default function ClientPage() {
                                 </span>
                               )}
                             </div>
-                            {idx < steps.length - 1 && (
+                            {idx < BOOKING_STEPS.length - 1 && (
                               <div
                                 style={{
                                   flex: 1,
@@ -1506,47 +1536,119 @@ export default function ClientPage() {
                     </div>
                   )}
 
-                  {/* STEP 1: SERVICE SELECTION */}
+                  {/* STEP 1: MASTER SELECTION */}
+                  {step === 'master' && (
+                    <>
+                      <PremiumCard style={{ padding: '20px' }}>
+                        <p style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: PREMIUM.textMuted, marginBottom: '12px' }}>
+                          Мастер
+                        </p>
+                        {teamMasters.length === 0 ? (
+                          <p style={{ textAlign: 'center', padding: '24px', fontSize: '14px', color: PREMIUM.textSecondary }}>
+                            Нет доступных мастеров
+                          </p>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {teamMasters.map((m) => (
+                              <button
+                                key={m.id}
+                                onClick={() => pickSalonMaster(m)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '14px',
+                                  padding: '14px 16px',
+                                  background: selectedSalonMaster?.id === m.id ? PREMIUM.accentSoft : 'rgba(255,255,255,0.92)',
+                                  border: selectedSalonMaster?.id === m.id ? `1.5px solid ${PREMIUM.accent}` : `1.5px solid ${PREMIUM.borderLight}`,
+                                  borderRadius: '20px',
+                                  cursor: 'pointer',
+                                  transition: PREMIUM.transition,
+                                  backdropFilter: PREMIUM.blurMedium,
+                                  WebkitBackdropFilter: PREMIUM.blurMedium,
+                                  textAlign: 'left',
+                                  width: '100%',
+                                }}
+                              >
+                                <SalonMasterAvatar
+                                  master={m}
+                                  size={72}
+                                  shadow={PREMIUM.shadowAvatar}
+                                  fallbackStyle={{ background: PREMIUM.accentSoft, color: PREMIUM.accent }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <p style={{ fontSize: '16px', fontWeight: '700', color: PREMIUM.textPrimary, lineHeight: 1.3 }}>
+                                    {formatSalonMasterName(m)}
+                                  </p>
+                                  {(m.specialty || m.specialization) && (
+                                    <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '4px', lineHeight: 1.35 }}>
+                                      {m.specialty || m.specialization}
+                                    </p>
+                                  )}
+                                </div>
+                                {selectedSalonMaster?.id === m.id && (
+                                  <div
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: '50%',
+                                      background: PREMIUM.accent,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    <Check size={16} color="#fff" strokeWidth={3} />
+                                  </div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </PremiumCard>
+                    </>
+                  )}
+
+                  {/* STEP 2: SERVICE SELECTION */}
                   {step === 'service' && (
                     <>
-                      {/* Category tabs */}
-                      {priceGroups.length > 1 && (
-                        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '0 4px', paddingBottom: '4px' }}>
-                          {priceGroups.map((group) => (
-                            <button
-                              key={group.id}
-                              onClick={() => {
-                                const masterFromGroup = teamMasters.find((m) => m.id === group.master?.id) || teamMasters[0];
-                                pickSalonMaster(masterFromGroup);
-                              }}
-                              style={{
-                                padding: '8px 16px',
-                                background: PREMIUM.bgSoft,
-                                border: `1.5px solid ${PREMIUM.borderLight}`,
-                                borderRadius: PREMIUM.radiusButton,
-                                fontSize: '13px',
-                                fontWeight: '600',
-                                color: PREMIUM.textPrimary,
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap',
-                                transition: PREMIUM.transition,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {group.name || group.master?.name || 'Услуги'}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Services */}
                       <PremiumCard style={{ padding: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                          <button
+                            onClick={() => setStep('master')}
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: '50%',
+                              background: PREMIUM.bgSoft,
+                              border: `1px solid ${PREMIUM.borderLight}`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              transition: PREMIUM.transition,
+                              flexShrink: 0,
+                            }}
+                          >
+                            <ChevronLeft size={18} color={PREMIUM.textPrimary} />
+                          </button>
+                          <div style={{ minWidth: 0 }}>
+                            <p style={{ fontSize: '14px', fontWeight: '600', color: PREMIUM.textSecondary }}>
+                              {formatSalonMasterName(selectedSalonMaster)}
+                            </p>
+                            {(selectedSalonMaster?.specialty || selectedSalonMaster?.specialization) && (
+                              <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginTop: '2px' }}>
+                                {selectedSalonMaster.specialty || selectedSalonMaster.specialization}
+                              </p>
+                            )}
+                          </div>
+                        </div>
                         <p style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: PREMIUM.textMuted, marginBottom: '12px' }}>
                           Услуга
                         </p>
                         {servicesForMaster.length === 0 ? (
                           <p style={{ textAlign: 'center', padding: '24px', fontSize: '14px', color: PREMIUM.textSecondary }}>
-                            Нет доступных услуг
+                            У этого мастера нет доступных услуг
                           </p>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1556,26 +1658,18 @@ export default function ClientPage() {
                                 variant="compact"
                                 item={item}
                                 selected={selectedService?.id === item.id}
-                                onSelect={pickService}
+                                onSelect={selectBookingService}
                                 onImageOpen={openServiceImage}
                               />
                             ))}
                           </div>
                         )}
                       </PremiumCard>
-
-                      <PremiumCtaBtn
-                        onClick={() => setStep('master')}
-                        disabled={!selectedService}
-                      >
-                        Далее
-                        <ChevronLeft size={18} style={{ transform: 'rotate(180deg)' }} />
-                      </PremiumCtaBtn>
                     </>
                   )}
 
-                  {/* STEP 2: MASTER SELECTION */}
-                  {step === 'master' && (
+                  {/* STEP 3: DATE & TIME */}
+                  {step === 'datetime' && (
                     <>
                       <PremiumCard style={{ padding: '20px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
@@ -1598,117 +1692,7 @@ export default function ClientPage() {
                             <ChevronLeft size={18} color={PREMIUM.textPrimary} />
                           </button>
                           <p style={{ fontSize: '14px', fontWeight: '600', color: PREMIUM.textSecondary }}>
-                            {selectedService?.name}
-                          </p>
-                        </div>
-                        <p style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: PREMIUM.textMuted, marginBottom: '12px' }}>
-                          Мастер
-                        </p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {teamMasters.map((m) => (
-                            <button
-                              key={m.id}
-                              onClick={() => { setSelectedSalonMaster(m); setStep('datetime'); }}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '14px',
-                                padding: '14px 16px',
-                                background: selectedSalonMaster?.id === m.id ? PREMIUM.accentSoft : 'rgba(255,255,255,0.92)',
-                                border: selectedSalonMaster?.id === m.id ? `1.5px solid ${PREMIUM.accent}` : `1.5px solid ${PREMIUM.borderLight}`,
-                                borderRadius: '20px',
-                                cursor: 'pointer',
-                                transition: PREMIUM.transition,
-                                backdropFilter: PREMIUM.blurMedium,
-                                WebkitBackdropFilter: PREMIUM.blurMedium,
-                                textAlign: 'left',
-                                width: '100%',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  width: 56,
-                                  height: 56,
-                                  borderRadius: '16px',
-                                  overflow: 'hidden',
-                                  flexShrink: 0,
-                                  boxShadow: PREMIUM.shadowAvatar,
-                                }}
-                              >
-                                {m.photo_url ? (
-                                  <img src={mediaUrl(m.photo_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                ) : (
-                                  <div
-                                    style={{
-                                      width: '100%',
-                                      height: '100%',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '20px',
-                                      fontWeight: '700',
-                                      background: PREMIUM.accentSoft,
-                                      color: PREMIUM.accent,
-                                    }}
-                                  >
-                                    {m.name?.[0]}
-                                  </div>
-                                )}
-                              </div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <p style={{ fontSize: '15px', fontWeight: '700', color: PREMIUM.textPrimary }}>{m.name}</p>
-                                {m.specialization && (
-                                  <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>{m.specialization}</p>
-                                )}
-                              </div>
-                              {selectedSalonMaster?.id === m.id && (
-                                <div
-                                  style={{
-                                    width: 28,
-                                    height: 28,
-                                    borderRadius: '50%',
-                                    background: PREMIUM.accent,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  <Check size={16} color="#fff" strokeWidth={3} />
-                                </div>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </PremiumCard>
-                    </>
-                  )}
-
-                  {/* STEP 3: DATE & TIME */}
-                  {step === 'datetime' && (
-                    <>
-                      <PremiumCard style={{ padding: '20px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                          <button
-                            onClick={() => setStep('master')}
-                            style={{
-                              width: 36,
-                              height: 36,
-                              borderRadius: '50%',
-                              background: PREMIUM.bgSoft,
-                              border: `1px solid ${PREMIUM.borderLight}`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                              transition: PREMIUM.transition,
-                              flexShrink: 0,
-                            }}
-                          >
-                            <ChevronLeft size={18} color={PREMIUM.textPrimary} />
-                          </button>
-                          <p style={{ fontSize: '14px', fontWeight: '600', color: PREMIUM.textSecondary }}>
-                            {selectedService?.name} · {selectedSalonMaster?.name}
+                            {selectedService?.name} · {formatSalonMasterName(selectedSalonMaster)}
                           </p>
                         </div>
                         <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: '1fr' }}>
@@ -1817,18 +1801,20 @@ export default function ClientPage() {
 
                         {/* Summary */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px', background: PREMIUM.bgSoft, borderRadius: '20px', marginBottom: '20px' }}>
-                          <div style={{ width: 64, height: 64, borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
-                            {selectedSalonMaster?.photo_url ? (
-                              <img src={mediaUrl(selectedSalonMaster.photo_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            ) : (
-                              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: '700', background: PREMIUM.accentSoft, color: PREMIUM.accent }}>
-                                {selectedSalonMaster?.name?.[0]}
-                              </div>
-                            )}
-                          </div>
+                          <SalonMasterAvatar
+                            master={selectedSalonMaster}
+                            size={64}
+                            radius={16}
+                            fallbackStyle={{ background: PREMIUM.accentSoft, color: PREMIUM.accent }}
+                          />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <p style={{ fontSize: '15px', fontWeight: '700', color: PREMIUM.textPrimary }}>{selectedService?.name}</p>
-                            <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>{selectedSalonMaster?.name}</p>
+                            <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>{formatSalonMasterName(selectedSalonMaster)}</p>
+                            {(selectedSalonMaster?.specialty || selectedSalonMaster?.specialization) && (
+                              <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginTop: '2px' }}>
+                                {selectedSalonMaster.specialty || selectedSalonMaster.specialization}
+                              </p>
+                            )}
                             <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>
                               {new Date(selectedSlot).toLocaleString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long', hour: '2-digit', minute: '2-digit' })}
                             </p>
