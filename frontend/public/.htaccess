@@ -1,0 +1,17 @@
+# SPA (React): все пути вроде /m/..., /login, /dashboard → index.html
+# Нужно, если фронт лежит на Apache (Beget) как статика.
+# Если домен проксируется на Node :3000 — этот файл не обязателен.
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  RewriteRule ^api/ - [L]
+  RewriteRule ^uploads/ - [L]
+  RewriteRule ^webhook - [L]
+
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>

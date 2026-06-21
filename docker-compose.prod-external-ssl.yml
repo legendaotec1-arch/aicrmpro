@@ -1,0 +1,94 @@
+# Продакшен, когда SSL уже на домене masterclient45.ru (Beget, nginx на хосте и т.д.)
+# Caddy не используется — прокси с хостинга ведёт на порты ниже.
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-crm_max}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - '${BACKEND_PORT:-3000}:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      UPLOADS_DIR: /app/uploads
+      FRONTEND_DIST: /app/frontend/dist
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app]
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - '${BOT_PORT:-3001}:3001'
+    environment:
+      BACKEND_URL: http://backend:3000
+      PORT: 3001
+    networks: [app]
+
+  telegram-bot:
+    build:
+      context: ./telegram-bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - '${TELEGRAM_BOT_PORT:-3002}:3002'
+    environment:
+      BACKEND_URL: http://backend:3000
+      PORT: 3002
+    networks: [app]
+
+  notification_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      MAX_BOT_URL: http://bot:3001
+      TELEGRAM_BOT_URL: http://telegram-bot:3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bot:
+        condition: service_started
+      telegram-bot:
+        condition: service_started
+    networks: [app]
+
+volumes:
+  postgres_data:
+  uploads_data:
+
+networks:
+  app:
+    driver: bridge

@@ -1,0 +1,10 @@
+backend/.env
+.env
+.env.*
+**/.env
+**/node_modules
+**/.git
+frontend/dist
+frontend/node_modules
+bot/node_modules
+telegram-bot/node_modules

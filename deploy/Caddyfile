@@ -1,0 +1,23 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+
+	# MAX webhook
+	handle /webhook* {
+		reverse_proxy bot:3001
+	}
+
+	# Telegram notify API (внутренний; снаружи обычно не нужен)
+	handle /telegram-notify* {
+		uri strip_prefix /telegram-notify
+		reverse_proxy telegram-bot:3002
+	}
+
+	# Сайт, API, загрузки — один backend
+	handle {
+		reverse_proxy backend:3000
+	}
+}

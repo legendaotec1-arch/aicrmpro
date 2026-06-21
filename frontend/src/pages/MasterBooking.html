@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Запись к мастеру</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            powder: {
+              50: '#FDF8F5',
+              100: '#F9F2ED',
+              200: '#F5EBE6',
+              300: '#E8D5CC',
+            },
+            orange: {
+              muted: '#E8A37E',
+              dark: '#D9895F',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+          borderRadius: {
+            '2xl': '20px',
+            '3xl': '24px',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { 
+      font-family: 'Inter', system-ui, sans-serif; 
+      background: linear-gradient(135deg, #FDF8F5 0%, #F9F2ED 50%, #F5EBE6 100%);
+      min-height: 100vh;
+      overscroll-behavior: none;
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+    }
+    .glass-dark {
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #E8A37E 0%, #D9895F 100%);
+      color: white;
+      transition: all 0.2s ease;
+    }
+    .btn-primary:active { transform: scale(0.97); opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.4; transform: none; }
+    .card-select {
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .card-select:hover { transform: translateY(-2px); }
+    .card-select.selected {
+      border-color: #E8A37E !important;
+      background: rgba(232, 163, 126, 0.08) !important;
+    }
+    .slot-time {
+      transition: all 0.2s ease;
+    }
+    .slot-time:hover { background: rgba(232, 163, 126, 0.15); }
+    .slot-time.selected {
+      background: linear-gradient(135deg, #E8A37E 0%, #D9895F 100%) !important;
+      color: white !important;
+      border-color: transparent !important;
+    }
+    .tab-active {
+      color: #D9895F;
+      border-bottom: 2px solid #E8A37E;
+    }
+    .fade-in { animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .slide-up { animation: slideUp 0.3s ease; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
+    .toast {
+      animation: toastIn 0.4s ease, toastOut 0.4s ease 2.6s forwards;
+    }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-20px); } }
+    .portfolio-item {
+      width: 80px;
+      height: 80px;
+      border-radius: 16px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .portfolio-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.2s;
+    }
+    .portfolio-item:active img { transform: scale(1.05); }
+    .fullscreen-viewer {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.95);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .fullscreen-viewer img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .notification-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 18px;
+      height: 18px;
+      background: #E8A37E;
+      border-radius: 50%;
+      font-size: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
+    .safe-area-top { padding-top: max(env(safe-area-inset-top), 20px); }
+    .safe-area-bottom { padding-bottom: max(env(safe-area-inset-bottom), 20px); }
+  </style>
+</head>
+<body class="text-gray-800">
+  <div id="app" class="max-w-lg mx-auto min-h-screen flex flex-col">
+    
+    <!-- Header Tabs -->
+    <header class="glass safe-area-top sticky top-0 z-50">
+      <div class="flex px-4 py-3">
+        <button onclick="switchTab('master')" class="flex-1 py-2 text-sm font-medium transition-colors tab-active" id="tab-master">
+          Мастер
+        </button>
+        <button onclick="switchTab('appointments')" class="flex-1 py-2 text-sm font-medium transition-colors text-gray-400 relative" id="tab-appointments">
+          Мои записи
+          <span id="appointments-badge" class="notification-badge hidden">0</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- MASTER TAB -->
+    <main id="page-master" class="flex-1 overflow-y-auto pb-32">
+      
+      <!-- Master Header -->
+      <section class="glass mx-4 mt-4 p-4 rounded-2xl flex gap-4 fade-in">
+        <img src="https://i.pravatar.cc/150?img=1" alt="Мастер" class="w-20 h-20 rounded-2xl object-cover">
+        <div class="flex-1 min-w-0">
+          <h1 class="text-lg font-semibold text-gray-900">Анна Фомина</h1>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-yellow-500">★★★★★</span>
+            <span class="text-sm text-gray-500">4.9</span>
+            <span class="text-sm text-gray-400">· 128 отзывов</span>
+          </div>
+          <p class="text-sm text-gray-500 mt-1">Маникюр · Педикюр · Наращивание</p>
+          <p class="text-xs text-gray-400 mt-1">Опыт работы: 8 лет</p>
+        </div>
+      </section>
+
+      <!-- Portfolio -->
+      <section class="mt-4 px-4 fade-in" style="animation-delay: 0.1s">
+        <h3 class="text-sm font-medium text-gray-500 mb-3">Портфолио</h3>
+        <div class="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+          <div class="portfolio-item" onclick="openFullscreen(0)"><img src="https://picsum.photos/200?random=1" alt=""></div>
+          <div class="portfolio-item" onclick="openFullscreen(1)"><img src="https://picsum.photos/200?random=2" alt=""></div>
+          <div class="portfolio-item" onclick="openFullscreen(2)"><img src="https://picsum.photos/200?random=3" alt=""></div>
+          <div class="portfolio-item" onclick="openFullscreen(3)"><img src="https://picsum.photos/200?random=4" alt=""></div>
+          <div class="portfolio-item" onclick="openFullscreen(4)"><img src="https://picsum.photos/200?random=5" alt=""></div>
+        </div>
+      </section>
+
+      <!-- Services -->
+      <section class="mt-4 px-4 fade-in" style="animation-delay: 0.15s">
+        <h3 class="text-sm font-medium text-gray-500 mb-3">Услуги</h3>
+        <div class="space-y-2" id="services-list">
+          <!-- Service cards will be rendered here -->
+        </div>
+      </section>
+
+      <!-- Address & Map -->
+      <section class="mt-4 px-4 fade-in" style="animation-delay: 0.2s">
+        <h3 class="text-sm font-medium text-gray-500 mb-3">Адрес</h3>
+        <div class="glass rounded-2xl overflow-hidden">
+          <div id="map-placeholder" class="h-36 bg-gradient-to-br from-powder-200 to-powder-300 flex items-center justify-center">
+            <div class="text-center">
+              <div class="w-8 h-8 mx-auto mb-2 rounded-full bg-orange-muted flex items-center justify-center">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+              </div>
+              <p class="text-xs text-gray-500">Москва, ул. Тверская, 15</p>
+            </div>
+          </div>
+          <div class="p-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-orange-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+            </svg>
+            <span class="text-sm">м. Тверская · Тверская ул., 15</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Date & Time Selection (appears after service selection) -->
+      <section id="datetime-section" class="mt-4 px-4 hidden fade-in">
+        <h3 class="text-sm font-medium text-gray-500 mb-3">Дата и время</h3>
+        <div class="glass rounded-2xl p-4">
+          <input type="date" id="date-input" class="w-full p-3 rounded-xl bg-white/50 border border-gray-200 text-sm mb-4" min="">
+          <div id="time-slots" class="grid grid-cols-4 gap-2">
+            <!-- Time slots will be rendered here -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- BOOK BUTTON (fixed bottom) -->
+    <div id="book-button-container" class="fixed bottom-0 left-0 right-0 p-4 safe-area-bottom" style="max-width: 568px; margin: 0 auto;">
+      <button id="book-btn" onclick="bookAppointment()" disabled class="btn-primary w-full py-4 rounded-2xl text-base font-semibold shadow-lg disabled:shadow-none">
+        Записаться
+      </button>
+    </div>
+
+    <!-- MY APPOINTMENTS TAB -->
+    <main id="page-appointments" class="flex-1 overflow-y-auto pb-8 hidden">
+      <div id="appointments-list" class="p-4 space-y-3">
+        <!-- Appointments will be rendered here -->
+      </div>
+      <div id="appointments-empty" class="text-center py-16 text-gray-400 hidden">
+        <div class="text-4xl mb-3">📋</div>
+        <p>Пока нет записей</p>
+      </div>
+    </main>
+
+    <!-- Fullscreen Viewer -->
+    <div id="fullscreen-viewer" class="fullscreen-viewer hidden" onclick="closeFullscreen()">
+      <button class="absolute top-4 right-4 w-10 h-10 rounded-full glass text-white flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+      <button onclick="event.stopPropagation(); prevImage()" class="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full glass text-white flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <button onclick="event.stopPropagation(); nextImage()" class="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full glass text-white flex items-center justify-center">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </button>
+      <img id="fullscreen-img" src="" alt="" class="max-w-full max-h-full">
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed top-20 left-4 right-4 glass rounded-2xl p-4 z-50 hidden">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        <div>
+          <p class="font-medium text-gray-900" id="toast-title">Успешно!</p>
+          <p class="text-sm text-gray-500" id="toast-text"></p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ========== DATA ==========
+    const masterData = {
+      id: 'master-1',
+      name: 'Анна Фомина',
+      avatar: 'https://i.pravatar.cc/150?img=1',
+      rating: 4.9,
+      reviews: 128,
+      specialization: 'Маникюр · Педикюр · Наращивание',
+      experience: '8 лет',
+      address: 'м. Тверская · Тверская ул., 15',
+      portfolio: [
+        'https://picsum.photos/400?random=1',
+        'https://picsum.photos/400?random=2',
+        'https://picsum.photos/400?random=3',
+        'https://picsum.photos/400?random=4',
+        'https://picsum.photos/400?random=5',
+      ],
+      services: [
+        { id: 1, name: 'Маникюр с покрытием', duration: '60 мин', price: 2500 },
+        { id: 2, name: 'Укрепление ногтей', duration: '45 мин', price: 1500 },
+        { id: 3, name: 'Педикюр', duration: '90 мин', price: 3500 },
+        { id: 4, name: 'Наращивание', duration: '120 мин', price: 5000 },
+        { id: 5, name: 'Дизайн ногтей', duration: '30 мин', price: 800 },
+      ]
+    };
+
+    const timeSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+
+    // ========== STATE ==========
+    let state = {
+      selectedService: null,
+      selectedDate: null,
+      selectedTime: null,
+      appointments: JSON.parse(localStorage.getItem('appointments') || '[]'),
+      currentTab: 'master',
+      fullscreenIndex: 0,
+    };
+
+    // ========== INIT ==========
+    function init() {
+      renderServices();
+      renderTimeSlots();
+      updateBookButton();
+      updateAppointmentsBadge();
+      setMinDate();
+      loadAppointments();
+      checkNotifications();
+    }
+
+    function setMinDate() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('date-input').min = today;
+      document.getElementById('date-input').value = today;
+      state.selectedDate = today;
+    }
+
+    // ========== RENDER ==========
+    function renderServices() {
+      const container = document.getElementById('services-list');
+      container.innerHTML = masterData.services.map(s => `
+        <div class="glass card-select rounded-2xl p-4 flex items-center justify-between ${state.selectedService?.id === s.id ? 'selected' : ''}" onclick="selectService(${s.id})">
+          <div>
+            <p class="font-medium">${s.name}</p>
+            <p class="text-sm text-gray-500">${s.duration}</p>
+          </div>
+          <div class="text-right">
+            <p class="font-semibold text-orange-muted">${s.price.toLocaleString()} ₽</p>
+            <div class="w-5 h-5 rounded-full border-2 ${state.selectedService?.id === s.id ? 'border-orange-muted bg-orange-muted' : 'border-gray-300'} mt-1 flex items-center justify-center ml-auto ${state.selectedService?.id === s.id ? '' : 'hidden'} service-check">
+              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderTimeSlots() {
+      const container = document.getElementById('time-slots');
+      container.innerHTML = timeSlots.map(t => `
+        <button class="slot-time py-2 px-1 rounded-xl border border-gray-200 text-sm font-medium ${state.selectedTime === t ? 'selected' : 'text-gray-600'}" onclick="selectTime('${t}')">
+          ${t}
+        </button>
+      `).join('');
+    }
+
+    function renderAppointments() {
+      const container = document.getElementById('appointments-list');
+      const empty = document.getElementById('appointments-empty');
+      
+      if (state.appointments.length === 0) {
+        container.classList.add('hidden');
+        empty.classList.remove('hidden');
+        return;
+      }
+      
+      container.classList.remove('hidden');
+      empty.classList.add('hidden');
+      
+      container.innerHTML = state.appointments.map((apt, i) => `
+        <div class="glass rounded-2xl p-4 fade-in" style="animation-delay: ${i * 0.05}s">
+          <div class="flex items-start gap-3">
+            <img src="${masterData.avatar}" alt="" class="w-12 h-12 rounded-xl object-cover">
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold">${apt.serviceName}</p>
+              <p class="text-sm text-gray-500">${apt.date} · ${apt.time}</p>
+              <p class="text-xs text-gray-400 mt-1">${masterData.address}</p>
+            </div>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <button onclick="rescheduleAppointment(${i})" class="flex-1 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 active:bg-gray-100">
+              Перенести
+            </button>
+            <button onclick="cancelAppointment(${i})" class="flex-1 py-2 rounded-xl border border-red-200 text-sm font-medium text-red-500 active:bg-red-50">
+              Отменить
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ========== ACTIONS ==========
+    function selectService(id) {
+      const service = masterData.services.find(s => s.id === id);
+      state.selectedService = service;
+      state.selectedTime = null;
+      renderServices();
+      renderTimeSlots();
+      document.getElementById('datetime-section').classList.remove('hidden');
+      updateBookButton();
+    }
+
+    function selectTime(time) {
+      state.selectedTime = time;
+      renderTimeSlots();
+      updateBookButton();
+    }
+
+    function updateBookButton() {
+      const btn = document.getElementById('book-btn');
+      const { selectedService, selectedDate, selectedTime } = state;
+      const canBook = selectedService && selectedDate && selectedTime;
+      btn.disabled = !canBook;
+    }
+
+    function bookAppointment() {
+      if (!state.selectedService || !state.selectedDate || !state.selectedTime) return;
+      
+      const apt = {
+        id: Date.now(),
+        serviceName: state.selectedService.name,
+        servicePrice: state.selectedService.price,
+        date: state.selectedDate,
+        time: state.selectedTime,
+        address: masterData.address,
+        masterName: masterData.name,
+        createdAt: new Date().toISOString(),
+        notify24h: false,
+        notify3h: false,
+      };
+      
+      state.appointments.push(apt);
+      saveAppointments();
+      updateAppointmentsBadge();
+      
+      showToast('Поздравляем!', `Вы записаны на ${formatDate(state.selectedDate)} в ${state.selectedTime}`);
+      
+      // Reset selection
+      state.selectedService = null;
+      state.selectedTime = null;
+      renderServices();
+      renderTimeSlots();
+      document.getElementById('datetime-section').classList.add('hidden');
+      updateBookButton();
+      
+      // Switch to appointments tab
+      setTimeout(() => switchTab('appointments'), 1500);
+    }
+
+    function cancelAppointment(index) {
+      state.appointments.splice(index, 1);
+      saveAppointments();
+      updateAppointmentsBadge();
+      renderAppointments();
+    }
+
+    function rescheduleAppointment(index) {
+      const apt = state.appointments[index];
+      state.selectedService = masterData.services.find(s => s.name === apt.serviceName) || { name: apt.serviceName, price: apt.servicePrice };
+      state.selectedDate = null;
+      state.selectedTime = null;
+      switchTab('master');
+      renderServices();
+      document.getElementById('datetime-section').classList.remove('hidden');
+      updateBookButton();
+      showToast('Перенос записи', 'Выберите новую дату и время');
+    }
+
+    // ========== TABS ==========
+    function switchTab(tab) {
+      state.currentTab = tab;
+      document.getElementById('page-master').classList.toggle('hidden', tab !== 'master');
+      document.getElementById('page-appointments').classList.toggle('hidden', tab !== 'appointments');
+      document.getElementById('book-button-container').classList.toggle('hidden', tab !== 'master');
+      document.getElementById('tab-master').classList.toggle('tab-active', tab === 'master');
+      document.getElementById('tab-master').classList.toggle('text-gray-400', tab !== 'master');
+      document.getElementById('tab-appointments').classList.toggle('tab-active', tab === 'appointments');
+      document.getElementById('tab-appointments').classList.toggle('text-gray-400', tab !== 'appointments');
+      
+      if (tab === 'appointments') {
+        renderAppointments();
+      }
+    }
+
+    // ========== FULLSCREEN ==========
+    function openFullscreen(index) {
+      state.fullscreenIndex = index;
+      document.getElementById('fullscreen-img').src = masterData.portfolio[index];
+      document.getElementById('fullscreen-viewer').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeFullscreen() {
+      document.getElementById('fullscreen-viewer').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    function prevImage() {
+      state.fullscreenIndex = (state.fullscreenIndex - 1 + masterData.portfolio.length) % masterData.portfolio.length;
+      document.getElementById('fullscreen-img').src = masterData.portfolio[state.fullscreenIndex];
+    }
+
+    function nextImage() {
+      state.fullscreenIndex = (state.fullscreenIndex + 1) % masterData.portfolio.length;
+      document.getElementById('fullscreen-img').src = masterData.portfolio[state.fullscreenIndex];
+    }
+
+    // ========== STORAGE ==========
+    function saveAppointments() {
+      localStorage.setItem('appointments', JSON.stringify(state.appointments));
+    }
+
+    function loadAppointments() {
+      state.appointments = JSON.parse(localStorage.getItem('appointments') || '[]');
+    }
+
+    function updateAppointmentsBadge() {
+      const badge = document.getElementById('appointments-badge');
+      const count = state.appointments.length;
+      badge.textContent = count;
+      badge.classList.toggle('hidden', count === 0);
+    }
+
+    // ========== NOTIFICATIONS ==========
+    function checkNotifications() {
+      const now = new Date();
+      state.appointments.forEach(apt => {
+        const aptDate = new Date(`${apt.date}T${apt.time}`);
+        const hoursUntil = (aptDate - now) / (1000 * 60 * 60);
+        
+        if (hoursUntil <= 24 && hoursUntil > 0 && !apt.notify24h) {
+          apt.notify24h = true;
+          saveAppointments();
+          showToast('Напоминание', `Через 24 часа запись на ${apt.serviceName}`);
+          console.log(`[УВЕДОМЛЕНИЕ] За 24 часа до записи: ${apt.serviceName} - ${apt.date} ${apt.time}`);
+        }
+        
+        if (hoursUntil <= 3 && hoursUntil > 0 && !apt.notify3h) {
+          apt.notify3h = true;
+          saveAppointments();
+          showToast('Напоминание', `Через 3 часа запись на ${apt.serviceName}`);
+          console.log(`[УВЕДОМЛЕНИЕ] За 3 часа до записи: ${apt.serviceName} - ${apt.date} ${apt.time}`);
+        }
+      });
+    }
+
+    setInterval(checkNotifications, 60000); // Check every minute
+
+    // ========== TOAST ==========
+    function showToast(title, text) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-title').textContent = title;
+      document.getElementById('toast-text').textContent = text;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 3000);
+    }
+
+    // ========== HELPERS ==========
+    function formatDate(dateStr) {
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    }
+
+    // Date input change
+    document.getElementById('date-input').addEventListener('change', (e) => {
+      state.selectedDate = e.target.value;
+      updateBookButton();
+    });
+
+    // Keyboard navigation for fullscreen
+    document.addEventListener('keydown', (e) => {
+      if (document.getElementById('fullscreen-viewer').classList.contains('hidden')) return;
+      if (e.key === 'ArrowLeft') prevImage();
+      if (e.key === 'ArrowRight') nextImage();
+      if (e.key === 'Escape') closeFullscreen();
+    });
+
+    // Init
+    init();
+  </script>
+</body>
+</html>

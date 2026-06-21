@@ -1,0 +1,17 @@
+# SSL-сертификат уже есть — положите файлы в deploy/certs/
+# fullchain.pem (или certificate.crt)
+# privkey.pem
+
+{$DOMAIN} {
+	encode gzip
+
+	tls /certs/fullchain.pem /certs/privkey.pem
+
+	handle /webhook* {
+		reverse_proxy bot:3001
+	}
+
+	handle {
+		reverse_proxy backend:3000
+	}
+}

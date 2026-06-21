@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+deploy/.env.server*
+.env
+
+# Build output
+dist/
+build/
+
+# Database
+*.db
+data/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Uploads
+uploads/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+
+# Cloudflare
+cloudflared/
+
+# Bot logs
+*.log
+node_modules

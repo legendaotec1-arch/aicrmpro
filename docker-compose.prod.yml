@@ -1,0 +1,115 @@
+# Продакшен: один домен, HTTPS через Caddy, сайт + API на backend:3000
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-crm_max}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      UPLOADS_DIR: /app/uploads
+      FRONTEND_DIST: /app/frontend/dist
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app]
+    ports:
+      - "3000:3000"
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BACKEND_URL: http://backend:3000
+      MAX_API_URL: ${MAX_API_URL:-https://platform-api.max.ru}
+      MAX_WEBHOOK_URL: ${MAX_WEBHOOK_URL:-}
+      MAX_WEBHOOK_SECRET: ${MAX_WEBHOOK_SECRET:-}
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    networks: [app]
+
+  telegram-bot:
+    build:
+      context: ./telegram-bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BACKEND_URL: http://backend:3000
+      PORT: 3002
+    networks: [app]
+
+  notification_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      MAX_BOT_URL: http://bot:3001
+      TELEGRAM_BOT_URL: http://telegram-bot:3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bot:
+        condition: service_started
+      telegram-bot:
+        condition: service_started
+    networks: [app]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-aicrmpro.ru}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@aicrmpro.ru}
+    depends_on:
+      - backend
+      - bot
+      - telegram-bot
+    networks: [app]
+
+volumes:
+  postgres_data:
+  uploads_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  app:
+    driver: bridge
