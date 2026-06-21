@@ -8,6 +8,12 @@ const { sendMessengerNotification } = require('../utils/notify');
 const { displayPhone } = require('../utils/phoneRu');
 const { resolveTelegramChatUrl } = require('../utils/messengerLinks');
 const { validateBookingContact } = require('../utils/clientBookingValidation');
+const {
+  chargeBookingFee,
+  isBillingEnabled,
+  getMasterBillingRow,
+  evaluateOnlineBooking
+} = require('../utils/billing');
 
 const router = express.Router();
 
@@ -19,6 +25,7 @@ router.get('/', authMiddleware, async (req, res) => {
     let query = `
       SELECT a.*,
              c.name as client_name,
+             c.photo_url as client_photo_url,
              COALESCE(NULLIF(scp.phone, ''), c.phone) as client_phone,
              c.telegram_user_id,
              c.telegram_username,
@@ -153,12 +160,34 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(409).json({ error: 'Время уже занято' });
     }
 
+    if (isBillingEnabled()) {
+      const billingRow = await getMasterBillingRow(req.masterId);
+      const bookingCheck = evaluateOnlineBooking(billingRow);
+      if (!bookingCheck.allowed) {
+        return res.status(403).json({
+          error: 'Недостаточно средств на балансе. Пополните баланс для создания записи.',
+          code: 'BOOKING_BLOCKED'
+        });
+      }
+    }
+
     const appointmentId = uuidv4();
     await db.query(
       `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [appointmentId, req.masterId, salonMasterResolved, clientId, serviceName, servicePrice, appointmentTime, durationMinutes, clientNotes]
     );
+
+    try {
+      await chargeBookingFee(req.masterId, appointmentId, { context: 'manual' });
+    } catch (billingErr) {
+      await db.query('DELETE FROM appointments WHERE id = $1', [appointmentId]);
+      const status = billingErr.status || 403;
+      return res.status(status).json({
+        error: billingErr.message || 'Недостаточно средств на балансе',
+        code: billingErr.code || 'BOOKING_BLOCKED'
+      });
+    }
 
     res.status(201).json({ success: true, appointmentId });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Input from '../ui/Input';
+import Button from '../ui/Button';
 import { PageLoader } from '../ui/Spinner';
 import { MessageCircle, Phone, Send } from 'lucide-react';
 
@@ -95,13 +96,9 @@ export default function NotifySettingsCard({ api, toast }) {
         </div>
       </div>
 
-      <button
-        type="submit"
-        disabled={saving}
-        className="w-full sm:w-auto px-4 py-2 rounded-lg bg-admin-accent text-white text-sm font-semibold hover:bg-admin-accentHover transition disabled:opacity-50"
-      >
-        {saving ? 'Сохранение...' : 'Сохранить'}
-      </button>
+      <Button type="submit" loading={saving} className="w-full sm:w-auto">
+        Сохранить
+      </Button>
     </form>
   );
 }

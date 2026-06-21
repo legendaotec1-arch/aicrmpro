@@ -3,8 +3,6 @@ import {
   Calendar,
   BarChart3,
   Home,
-  Images,
-  Link2,
   LogOut,
   Menu,
   Palette,
@@ -16,10 +14,10 @@ import {
   Users,
   X,
   Clock,
-  ShieldOff,
   Wallet
 } from 'lucide-react';
 import Logo from '../brand/Logo';
+import BrandName from '../brand/BrandName';
 import Button from '../ui/Button';
 import { mediaUrl } from '../../lib/media';
 
@@ -37,8 +35,7 @@ const NAV_GROUPS = [
     title: 'Работа',
     items: [
       { id: 'schedule', label: 'Расписание', Icon: Clock },
-      { id: 'prices', label: 'Услуги', Icon: Sparkles },
-      { id: 'portfolio', label: 'Портфолио', Icon: Images }
+      { id: 'prices', label: 'Услуги', Icon: Sparkles }
     ]
   },
   {
@@ -52,11 +49,9 @@ const NAV_GROUPS = [
     title: 'Настройки',
     items: [
       { id: 'team', label: 'Мастера', Icon: UserRound },
-      { id: 'links', label: 'Ссылка на запись', Icon: Link2 },
       { id: 'themes', label: 'Тема оформления', Icon: Palette },
       { id: 'profile', label: 'Профиль', Icon: Settings },
-      { id: 'billing', label: 'Оплата', Icon: Wallet },
-      { id: 'blacklist', label: 'Чёрный список', Icon: ShieldOff }
+      { id: 'billing', label: 'Оплата', Icon: Wallet }
     ]
   }
 ];
@@ -67,9 +62,7 @@ const TEAM_NAV_IDS = new Set([
   'clients',
   'schedule',
   'prices',
-  'portfolio',
-  'links',
-  'blacklist'
+  'profile'
 ]);
 
 function getNavGroups(isTeamMember) {
@@ -233,7 +226,7 @@ export default function DashboardLayout({
         {/* Mobile header */}
         <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-admin-border safe-top">
           <div className="flex items-center justify-between h-14 px-4">
-            <span className="font-semibold text-admin-text">woner.ru</span>
+            <BrandName className="text-admin-text" />
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
@@ -253,7 +246,7 @@ export default function DashboardLayout({
             aria-modal="true"
           >
             <div className="flex items-center justify-between h-14 px-4 border-b border-admin-border shrink-0">
-              <span className="font-semibold text-admin-text">woner.ru</span>
+              <BrandName className="text-admin-text" />
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}

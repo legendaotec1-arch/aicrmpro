@@ -345,7 +345,7 @@ async function buildOwnerRevenueXlsx({ salonId, month = null }) {
   ]);
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'woner.ru CRM';
+  workbook.creator = 'Woner.ru CRM';
   const usedNames = new Set();
 
   const summary = workbook.addWorksheet(safeSheetName('Сводка', usedNames));

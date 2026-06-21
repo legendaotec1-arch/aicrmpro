@@ -28,10 +28,11 @@ const {
   buildOwnerRevenueXlsx
 } = require('../utils/revenueReport');
 const { buildStats } = require('../utils/clientStats');
+const { fetchClientsExportRows, buildClientsCsv } = require('../utils/clientsExport');
 const { formatClientDisplayName } = require('../utils/clientDisplay');
 const { formatMasterPublicTitle } = require('../utils/masterDisplay');
 const { buildSocialLinksFromRow, pickSocialPayload } = require('../utils/socialLinks');
-const { upsertScheduleException } = require('../utils/scheduleExceptions');
+const { upsertScheduleException, cleanupPastScheduleExceptions, mskTodayDateStr } = require('../utils/scheduleExceptions');
 const { sendMessengerNotification } = require('../utils/notify');
 const { daysAgo, buildDailySeries } = require('../utils/analytics');
 const {
@@ -759,9 +760,11 @@ router.get('/me/slots', authMiddleware, async (req, res) => {
 router.get('/me/exceptions', authMiddleware, async (req, res) => {
   try {
     const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
+    await cleanupPastScheduleExceptions(db, { salonMasterId });
+    const today = mskTodayDateStr();
     const result = await db.query(
-      'SELECT * FROM schedule_exceptions WHERE salon_master_id = $1 ORDER BY exception_date',
-      [salonMasterId]
+      'SELECT * FROM schedule_exceptions WHERE salon_master_id = $1 AND exception_date >= $2::date ORDER BY exception_date',
+      [salonMasterId, today]
     );
     res.json(result.rows);
   } catch (error) {
@@ -774,9 +777,8 @@ router.get('/me/exceptions', authMiddleware, async (req, res) => {
 router.post('/me/exceptions', authMiddleware, async (req, res) => {
   try {
     const { exception_date, is_working, start_time, end_time, salonMasterId: bodySalonMasterId } = req.body;
-    console.log('[exception save] bodySalonMasterId:', bodySalonMasterId);
     const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
-    console.log('[exception save] resolved salonMasterId:', salonMasterId, 'exception_date:', exception_date, 'is_working:', is_working);
+    await cleanupPastScheduleExceptions(db, { salonMasterId });
 
     await upsertScheduleException(db, {
       masterId: req.masterId,
@@ -806,8 +808,9 @@ router.post('/me/exceptions/bulk', authMiddleware, async (req, res) => {
     }
 
     const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
+    await cleanupPastScheduleExceptions(db, { salonMasterId });
     const normalized = [...new Set(dates.map((d) => String(d).slice(0, 10)))].filter((d) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(d)
+      /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= mskTodayDateStr()
     );
 
     if (action === 'remove') {
@@ -946,26 +949,24 @@ router.post('/me/prices/upload', authMiddleware, upload.single('image'), async (
   }
 });
 
-// Получить портфолио
+// Получить портфолио (общее для салона)
 router.get('/me/portfolio', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
     const result = await db.query(
-      'SELECT * FROM portfolio WHERE salon_master_id = $1 ORDER BY sort_order',
-      [salonMasterId]
+      'SELECT * FROM portfolio WHERE master_id = $1 ORDER BY sort_order, created_at',
+      [req.masterId]
     );
     res.json(result.rows);
   } catch (error) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Ошибка при получении портфолио' });
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при получении портфолио' });
   }
 });
 
-// Добавить медиа на главную страницу клиента
+// Добавить медиа на главную страницу клиента (общее портфолио салона)
 router.post('/me/portfolio', authMiddleware, upload.single('media'), async (req, res) => {
   try {
-    const { title, sort_order, salonMasterId: bodySalonMasterId, media_type, video_url } = req.body;
-    const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
+    const { title, sort_order, media_type, video_url } = req.body;
     const existingVideos = await db.query(
       `SELECT COUNT(*)::int AS count FROM portfolio
        WHERE master_id = $1
@@ -992,8 +993,8 @@ router.post('/me/portfolio', authMiddleware, upload.single('media'), async (req,
 
     await db.query(
       `INSERT INTO portfolio (id, master_id, salon_master_id, image_url, media_type, video_url, title, sort_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [uuidv4(), req.masterId, salonMasterId, image_url, requestedType, finalVideoUrl, title, sort_order || 0]
+       VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`,
+      [uuidv4(), req.masterId, image_url, requestedType, finalVideoUrl, title, sort_order || 0]
     );
 
     res.json({ success: true, image_url, video_url: finalVideoUrl, media_type: requestedType });
@@ -1007,12 +1008,39 @@ router.post('/me/portfolio', authMiddleware, upload.single('media'), async (req,
 // Удалить фото из портфолио
 router.delete('/me/portfolio/:id', authMiddleware, async (req, res) => {
   try {
-    const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
-    await db.query('DELETE FROM portfolio WHERE id = $1 AND salon_master_id = $2', [req.params.id, salonMasterId]);
+    await db.query('DELETE FROM portfolio WHERE id = $1 AND master_id = $2', [req.params.id, req.masterId]);
     res.json({ success: true });
   } catch (error) {
-    const status = error.status || 500;
-    res.status(status).json({ error: error.message || 'Ошибка при удалении фото' });
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при удалении фото' });
+  }
+});
+
+// Выгрузка клиентской базы в CSV
+router.get('/me/clients/export', authMiddleware, async (req, res) => {
+  try {
+    const rows = await fetchClientsExportRows({
+      masterId: req.masterId,
+      salonMasterId: req.salonMasterId,
+      isTeamMember: req.isTeamMember
+    });
+    const masterRow = await db.query(
+      'SELECT salon_name, name, last_name FROM masters WHERE id = $1',
+      [req.masterId]
+    );
+    const m = masterRow.rows[0];
+    const salonTitle = m?.salon_name || [m?.name, m?.last_name].filter(Boolean).join(' ') || 'Клиентская база';
+    const csv = buildClientsCsv(rows, { salonTitle });
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="clients_${stamp}.csv"; filename*=UTF-8''${encodeURIComponent(`клиенты_${stamp}.csv`)}`
+    );
+    res.send(csv);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при выгрузке клиентов' });
   }
 });
 
@@ -1443,18 +1471,48 @@ router.get('/me/reviews', authMiddleware, async (req, res) => {
 
 router.put('/me/reviews/:id', authMiddleware, async (req, res) => {
   try {
-    const { is_published, salon_reply } = req.body;
+    const { is_published, salon_reply, body, rating } = req.body;
+
+    if (rating != null) {
+      const r = Number(rating);
+      if (!Number.isInteger(r) || r < 1 || r > 5) {
+        return res.status(400).json({ error: 'Оценка от 1 до 5' });
+      }
+    }
+
     const result = await db.query(
       `UPDATE reviews SET
         is_published = COALESCE($1, is_published),
-        salon_reply = COALESCE($2, salon_reply)
-       WHERE id = $3 AND salon_id = $4 RETURNING id`,
-      [is_published, salon_reply, req.params.id, req.masterId]
+        salon_reply = COALESCE($2, salon_reply),
+        body = COALESCE($3, body),
+        rating = COALESCE($4, rating)
+       WHERE id = $5 AND salon_id = $6 RETURNING id`,
+      [
+        is_published !== undefined ? is_published : null,
+        salon_reply !== undefined ? salon_reply : null,
+        body !== undefined ? body : null,
+        rating !== undefined ? Number(rating) : null,
+        req.params.id,
+        req.masterId
+      ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Отзыв не найден' });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при обновлении отзыва' });
+  }
+});
+
+router.delete('/me/reviews/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await db.query(
+      'DELETE FROM reviews WHERE id = $1 AND salon_id = $2 RETURNING id',
+      [req.params.id, req.masterId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Отзыв не найден' });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Ошибка при удалении отзыва' });
   }
 });
 
@@ -1677,7 +1735,9 @@ router.get('/me/analytics', authMiddleware, requireOwner, async (req, res) => {
     );
 
     const rows = appointments.rows;
-    const active = rows.filter((r) => r.status === 'confirmed' || r.status === 'completed');
+    const active = rows.filter((r) =>
+      ['confirmed', 'completed', 'cancelled', 'no_show'].includes(r.status)
+    );
     const completed = rows.filter((r) => r.status === 'completed');
     const revenue = completed.reduce((s, r) => s + Number(r.service_price || 0), 0);
 
@@ -1804,7 +1864,7 @@ router.post('/me/billing/topup', authMiddleware, requireOwner, async (req, res) 
 
     const payment = await createPayment({
       amount,
-      description: `Пополнение баланса woner.ru (${amount} ₽)`,
+      description: `Пополнение баланса Woner.ru (${amount} ₽)`,
       metadata: { master_id: req.masterId, purpose: 'topup' }
     });
 
@@ -1835,7 +1895,7 @@ router.post('/me/billing/unlimited', authMiddleware, requireOwner, async (req, r
 
     const payment = await createPayment({
       amount: UNLIMITED_PRICE,
-      description: `Тариф «Безлимит» woner.ru (${UNLIMITED_PRICE} ₽ / 30 дней)`,
+      description: `Тариф «Безлимит» Woner.ru (${UNLIMITED_PRICE} ₽ / 30 дней)`,
       metadata: { master_id: req.masterId, purpose: 'unlimited' }
     });
 

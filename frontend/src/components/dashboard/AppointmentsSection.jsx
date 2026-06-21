@@ -2,7 +2,8 @@ import { ChevronRight } from 'lucide-react';
 import Card, { CardHeader } from '../ui/Card';
 import Button from '../ui/Button';
 import EmptyState from '../ui/EmptyState';
-import { isActiveAppointmentListItem, isAppointmentPastDue } from '../../lib/appointments';
+import ClientAvatar from './ClientAvatar';
+import { appointmentClientForAvatar, isActiveAppointmentListItem, isAppointmentPastDue } from '../../lib/appointments';
 
 export default function AppointmentsSection({
   appointments,
@@ -49,7 +50,7 @@ export default function AppointmentsSection({
     <Card>
       <CardHeader
         title="Записи"
-        description="Предстоящие визиты. Прошедшие — отметьте «Завершена» или «Не пришёл»"
+        description="Отметьте визит кнопками «Завершить» или «Не пришёл»"
         action={<Button onClick={onManualBook}>+ Новая запись</Button>}
       />
       <div className="divide-y divide-gray-100">
@@ -69,7 +70,7 @@ export default function AppointmentsSection({
                       : 'border-l-transparent hover:bg-admin-bg'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <button
                       type="button"
                       onClick={() => onOpenDetail(apt)}
@@ -83,11 +84,7 @@ export default function AppointmentsSection({
                           })}
                         </p>
                       </div>
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-admin-accent to-purple-400">
-                        <span className="text-xs font-bold text-white">
-                          {(apt.client_name || 'Г')[0].toUpperCase()}
-                        </span>
-                      </div>
+                      <ClientAvatar client={appointmentClientForAvatar(apt)} size="xs" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-admin-text">
                           {apt.client_name || 'Гость'}
@@ -97,17 +94,15 @@ export default function AppointmentsSection({
                           <p className="mt-0.5 text-xs font-medium text-red-600">Время визита прошло</p>
                         )}
                       </div>
-                      <ChevronRight size={14} className="shrink-0 text-admin-textMuted" />
+                      <ChevronRight size={14} className="shrink-0 text-admin-textMuted sm:hidden" />
                     </button>
-                  </div>
-                  {pastDue && (
-                    <div className="mt-3 flex flex-wrap gap-2 pl-[4.75rem]">
+                    <div className="flex flex-wrap gap-2 pl-[4.75rem] sm:pl-0 sm:shrink-0">
                       <Button
                         size="sm"
                         loading={resolvingId === `${apt.id}-completed`}
                         onClick={() => onResolve(apt.id, 'completed')}
                       >
-                        Завершена
+                        Завершить
                       </Button>
                       <Button
                         size="sm"
@@ -119,7 +114,7 @@ export default function AppointmentsSection({
                         Не пришёл
                       </Button>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })}

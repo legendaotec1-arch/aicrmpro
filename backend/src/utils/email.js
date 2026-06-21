@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 
-const SERVICE_NAME = process.env.BILLING_FROM_NAME || 'woner.ru';
+const SERVICE_NAME = process.env.BILLING_FROM_NAME || 'Woner.ru';
 
 function isPlaceholder(value) {
   if (value == null) return true;
@@ -76,13 +76,13 @@ async function sendBalanceAlertEmail({
   const dashboardUrl = `${(process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')}/dashboard?section=billing`;
 
   if (level === 'critical') {
-    const subject = `${SERVICE_NAME}: баланс ниже ${criticalThreshold} ₽ — онлайн-запись приостановлена`;
+    const subject = `${SERVICE_NAME}: баланс ниже ${criticalThreshold} ₽ — записи приостановлены`;
     const text = [
       'Здравствуйте!',
       '',
       `На вашем балансе ${SERVICE_NAME} осталось ${balanceStr}.`,
-      `При балансе ниже ${criticalThreshold} ₽ онлайн-запись клиентов по вашей ссылке временно недоступна.`,
-      `Пополните баланс от ${warnThreshold} ₽, чтобы снова принимать записи (${perBookingFee} ₽ за каждую онлайн-запись).`,
+      `При балансе ниже ${criticalThreshold} ₽ новые записи (онлайн и в кабинете) временно недоступны.`,
+      `Пополните баланс от ${warnThreshold} ₽, чтобы снова создавать записи (${perBookingFee} ₽ за каждую запись).`,
       '',
       `Личный кабинет: ${dashboardUrl}`,
       '',
@@ -96,8 +96,8 @@ async function sendBalanceAlertEmail({
     'Здравствуйте!',
     '',
     `Напоминаем: на балансе ${SERVICE_NAME} сейчас ${balanceStr}.`,
-    'Рекомендуем пополнить баланс заранее, чтобы онлайн-запись клиентов не прерывалась.',
-    `Списание: ${perBookingFee} ₽ за каждую онлайн-запись.`,
+    'Рекомендуем пополнить баланс заранее, чтобы создание записей не прерывалось.',
+    `Списание: ${perBookingFee} ₽ за каждую запись (онлайн или в кабинете).`,
     '',
     `Пополнить баланс: ${dashboardUrl}`,
     '',

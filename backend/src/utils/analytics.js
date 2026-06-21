@@ -13,7 +13,8 @@ function toDateKey(ts) {
   return `${y}-${m}-${day}`;
 }
 
-const COUNTABLE_STATUSES = new Set(['confirmed', 'completed']);
+const COUNTABLE_STATUSES = new Set(['confirmed', 'completed', 'cancelled', 'no_show']);
+const NEGATIVE_STATUSES = new Set(['cancelled', 'no_show']);
 
 function buildDailySeries(rows, days = 30) {
   const start = daysAgo(days - 1);
@@ -21,13 +22,30 @@ function buildDailySeries(rows, days = 30) {
   for (let i = 0; i < days; i++) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    map[toDateKey(d)] = { date: toDateKey(d), appointments: 0, revenue: 0 };
+    map[toDateKey(d)] = {
+      date: toDateKey(d),
+      appointments: 0,
+      active: 0,
+      confirmed: 0,
+      completed: 0,
+      negative: 0,
+      revenue: 0
+    };
   }
   rows.forEach((r) => {
     const key = toDateKey(r.appointment_time);
     if (!map[key]) return;
     if (COUNTABLE_STATUSES.has(r.status)) {
       map[key].appointments += 1;
+      if (r.status === 'confirmed') {
+        map[key].confirmed += 1;
+        map[key].active += 1;
+      }
+      if (r.status === 'completed') {
+        map[key].completed += 1;
+        map[key].active += 1;
+      }
+      if (NEGATIVE_STATUSES.has(r.status)) map[key].negative += 1;
     }
     if (r.status === 'completed') {
       map[key].revenue += Number(r.service_price || 0);

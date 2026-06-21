@@ -20,7 +20,7 @@ export default function Button({
       'bg-white text-admin-text border border-admin-border hover:bg-admin-hover shadow-sm',
     ghost: 'text-admin-textMuted hover:bg-admin-hover hover:text-admin-text',
     danger: 'bg-red-500 text-white hover:bg-red-600',
-    soft: 'bg-admin-accentSoft text-admin-accent hover:bg-teal-100',
+    soft: 'bg-admin-accentSoft text-admin-accent hover:bg-primary-100 hover:text-admin-accentHover',
     dark: 'bg-gray-800 text-white hover:bg-gray-700'
   };
 

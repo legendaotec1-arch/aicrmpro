@@ -7,6 +7,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import Logo from '../brand/Logo';
+import BrandName, { RichBrandText } from '../brand/BrandName';
 import ScrollToSectionLink from './ScrollToSectionLink';
 import { SITE_LEGAL } from '../../config/siteLegal';
 
@@ -105,7 +106,7 @@ export default function SiteFooter({ compact = false }) {
 
             <div className="mt-10 border-t border-slate-800 pt-8">
               <p className="text-xs leading-relaxed text-slate-500">
-                Используя сервис {SITE_LEGAL.serviceName}, вы подтверждаете ознакомление с{' '}
+                Используя сервис <BrandName className="text-slate-400" />, вы подтверждаете ознакомление с{' '}
                 <Link to="/legal/offer" className="text-slate-400 underline-offset-2 hover:text-slate-300 hover:underline">
                   договором оферты
                 </Link>
@@ -121,7 +122,7 @@ export default function SiteFooter({ compact = false }) {
               </p>
               <p className="mt-4 text-xs leading-relaxed text-slate-500">
                 <span className="font-semibold text-slate-400">* </span>
-                {SITE_LEGAL.metaDisclaimer}
+                <RichBrandText text={SITE_LEGAL.metaDisclaimer} brandClassName="text-slate-400" />
               </p>
             </div>
           </>
@@ -130,7 +131,7 @@ export default function SiteFooter({ compact = false }) {
         {compact && (
           <p className="mb-6 text-xs leading-relaxed text-slate-500">
             <span className="font-semibold text-slate-400">* </span>
-            {SITE_LEGAL.metaDisclaimer}
+            <RichBrandText text={SITE_LEGAL.metaDisclaimer} brandClassName="text-slate-400" />
           </p>
         )}
 
@@ -140,7 +141,7 @@ export default function SiteFooter({ compact = false }) {
           }`}
         >
           <p>
-            © {year} {SITE_LEGAL.serviceName}
+            © {year} <BrandName className="text-slate-400" />
           </p>
           {!compact && (
             <div className="flex flex-wrap gap-x-4 gap-y-2">

@@ -1,4 +1,5 @@
 import { Star } from 'lucide-react';
+import BrandName from '../brand/BrandName';
 import { PHONE_MOCKUP_IMAGES } from '../../config/landingMasters';
 
 function DashboardMockup() {
@@ -33,7 +34,10 @@ function DashboardMockup() {
         <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
         <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
-        <span className="ml-auto truncate text-[10px] text-slate-400 sm:text-[11px]">woner.ru · кабинет</span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <BrandName className="text-[10px] text-slate-500 sm:text-[11px]" />
+          <span className="text-[10px] text-slate-400 sm:text-[11px]">· кабинет</span>
+        </div>
       </div>
 
       <div className="grid min-h-[260px] grid-cols-[minmax(72px,88px)_1fr] sm:min-h-[280px] sm:grid-cols-[110px_1fr] md:min-h-[300px] md:grid-cols-[130px_1fr] lg:grid-cols-[140px_1fr]">

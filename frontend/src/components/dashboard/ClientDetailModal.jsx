@@ -376,6 +376,7 @@ export default function ClientDetailModal({
               </Button>
 
               <div className="border-t border-admin-border/60 pt-2">
+                <p className="mb-1.5 text-xs font-semibold text-admin-text">Заметка о клиенте:</p>
                 {noteEditing ? (
                   <div className="space-y-2">
                     <textarea

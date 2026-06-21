@@ -173,6 +173,57 @@ async function mergeSalonProfilePair(targetClientId, sourceClientId, salonId) {
   );
 }
 
+function clientsMergeCompatible(target, source) {
+  if (!target || !source) return false;
+  if (
+    target.max_user_id && source.max_user_id &&
+    target.max_user_id !== source.max_user_id
+  ) {
+    return false;
+  }
+  if (
+    target.telegram_user_id && source.telegram_user_id &&
+    target.telegram_user_id !== source.telegram_user_id
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function loadClientsForMerge(targetClientId, sourceClientId) {
+  const lockIds = [targetClientId, sourceClientId].sort();
+  const res = await db.query(
+    `SELECT id, max_user_id, telegram_user_id
+     FROM clients WHERE id = ANY($1::uuid[])`,
+    [lockIds]
+  );
+  return {
+    target: res.rows.find((row) => row.id === targetClientId),
+    source: res.rows.find((row) => row.id === sourceClientId)
+  };
+}
+
+/** Объединяет карточки, если messenger ID не конфликтуют; иначе оставляет target. */
+async function mergeClientsIfCompatible(targetClientId, sourceClientId) {
+  if (!targetClientId || !sourceClientId || targetClientId === sourceClientId) {
+    return targetClientId;
+  }
+  const { target, source } = await loadClientsForMerge(targetClientId, sourceClientId);
+  if (!clientsMergeCompatible(target, source)) {
+    console.warn('[mergeClientsIfCompatible] skip', { targetClientId, sourceClientId });
+    return targetClientId;
+  }
+  try {
+    return await mergeClientsIntoTarget(targetClientId, sourceClientId);
+  } catch (error) {
+    if (error.message?.includes('Конфликт')) {
+      console.warn('[mergeClientsIfCompatible] skip after error', error.message, { targetClientId, sourceClientId });
+      return targetClientId;
+    }
+    throw error;
+  }
+}
+
 /**
  * Переносит все связи с sourceClientId на targetClientId и удаляет дубликат.
  * @param {string} targetClientId — карточка, которую оставляем
@@ -185,26 +236,20 @@ async function mergeClientsIntoTarget(targetClientId, sourceClientId) {
 
   await db.query('BEGIN');
   try {
-    const [targetRes, sourceRes] = await Promise.all([
-      db.query(
-        `SELECT id, max_user_id, telegram_user_id, telegram_username, messenger, name, phone, photo_url
-         FROM clients WHERE id = $1 FOR UPDATE`,
-        [targetClientId]
-      ),
-      db.query(
-        `SELECT id, max_user_id, telegram_user_id, telegram_username, messenger, name, phone, photo_url
-         FROM clients WHERE id = $1 FOR UPDATE`,
-        [sourceClientId]
-      )
-    ]);
+    const lockIds = [targetClientId, sourceClientId].sort();
+    const lockedRes = await db.query(
+      `SELECT id, max_user_id, telegram_user_id, telegram_username, messenger, name, phone, photo_url
+       FROM clients WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+      [lockIds]
+    );
 
-    if (!targetRes.rows.length || !sourceRes.rows.length) {
+    const target = lockedRes.rows.find((row) => row.id === targetClientId);
+    const source = lockedRes.rows.find((row) => row.id === sourceClientId);
+
+    if (!target || !source) {
       await db.query('ROLLBACK');
       return targetClientId;
     }
-
-    const target = targetRes.rows[0];
-    const source = sourceRes.rows[0];
 
     if (
       target.max_user_id && source.max_user_id &&
@@ -283,6 +328,12 @@ async function mergeClientsIntoTarget(targetClientId, sourceClientId) {
         ? target.name
         : (source.name || target.name);
 
+    // unique-индексы на messenger id — сначала освобождаем source
+    await db.query(
+      `UPDATE clients SET max_user_id = NULL, telegram_user_id = NULL WHERE id = $1`,
+      [sourceClientId]
+    );
+
     await db.query(
       `UPDATE clients SET
          max_user_id = COALESCE(max_user_id, $1),
@@ -338,7 +389,7 @@ async function dedupeClientByPhone(salonId, clientId, phone) {
 
   let keepId = clientId;
   for (const row of others.rows) {
-    keepId = await mergeClientsIntoTarget(keepId, row.id);
+    keepId = await mergeClientsIfCompatible(keepId, row.id);
   }
   return keepId;
 }
@@ -444,7 +495,7 @@ async function findOrCreateClient({
   }
 
   if (clientId && phoneClientId && clientId !== phoneClientId) {
-    clientId = await mergeClientsIntoTarget(clientId, phoneClientId);
+    clientId = await mergeClientsIfCompatible(clientId, phoneClientId);
   } else if (!clientId && phoneClientId) {
     clientId = phoneClientId;
   }
@@ -465,19 +516,43 @@ async function findOrCreateClient({
   }
 
   const newClientId = uuidv4();
-  await db.query(
-    `INSERT INTO clients (id, max_user_id, telegram_user_id, messenger, name, phone, photo_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [
-      newClientId,
-      messenger === 'max' ? maxUserId || null : null,
-      messenger === 'telegram' ? telegramUserId || null : null,
+  const insertParams = [
+    newClientId,
+    messenger === 'max' ? maxUserId || null : null,
+    messenger === 'telegram' ? telegramUserId || null : null,
+    messenger,
+    name || 'Клиент',
+    storedPhone,
+    photoUrl || null
+  ];
+
+  try {
+    await db.query(
+      `INSERT INTO clients (id, max_user_id, telegram_user_id, messenger, name, phone, photo_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      insertParams
+    );
+  } catch (err) {
+    if (err.code !== '23505') throw err;
+    const existingId = await getClientByMessengerUserId(
       messenger,
-      name || 'Клиент',
+      messenger === 'max' ? maxUserId : telegramUserId
+    );
+    if (!existingId) throw err;
+    await enrichClientRecord(existingId, {
+      maxUserId: messenger === 'max' ? maxUserId : null,
+      telegramUserId: messenger === 'telegram' ? telegramUserId : null,
+      name,
       storedPhone,
-      photoUrl || null
-    ]
-  );
+      photoUrl,
+      telegramUsername
+    });
+    if (salonId && storedPhone) {
+      return dedupeClientByPhone(salonId, existingId, storedPhone);
+    }
+    return existingId;
+  }
+
   if (telegramUsername) await mergeClientTelegramUsername(newClientId, telegramUsername);
 
   if (salonId && storedPhone) {

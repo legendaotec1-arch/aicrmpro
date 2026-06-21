@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Camera, Percent, Timer, UserRound } from 'lucide-react';
 import Card, { CardHeader } from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -20,10 +21,20 @@ const emptyForm = {
   commission_percent: 50
 };
 
+function FormSection({ title, children }) {
+  return (
+    <section className="rounded-xl border border-admin-border/70 bg-admin-bg/40 p-3.5 sm:p-4">
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-admin-textMuted">{title}</p>
+      {children}
+    </section>
+  );
+}
+
 export default function SalonMastersSection({ masters, api, onChanged, toast }) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const openEdit = (m = null) => {
@@ -45,7 +56,21 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
       setForm(emptyForm);
     }
     setPhotoFile(null);
+    setPhotoPreview(null);
     setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setPhotoFile(null);
+    setPhotoPreview(null);
+  };
+
+  const handlePhotoChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setPhotoFile(file);
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhotoPreview(file ? URL.createObjectURL(file) : null);
   };
 
   const handleSubmit = async (e) => {
@@ -56,11 +81,11 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
     }
     if (!form.id) {
       if (!form.email.trim()) {
-        toast('Укажите email для входа мастера', 'error');
+        toast('Укажите email для входа', 'error');
         return;
       }
       if (!form.password || form.password.length < 6) {
-        toast('Пароль для входа — минимум 6 символов', 'error');
+        toast('Пароль — минимум 6 символов', 'error');
         return;
       }
     }
@@ -94,8 +119,8 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
         });
       }
 
-      toast(form.id ? 'Мастер обновлён' : 'Мастер добавлен');
-      setShowModal(false);
+      toast(form.id ? 'Сохранено' : 'Мастер добавлен');
+      closeModal();
       await onChanged();
     } catch (err) {
       toast(err.response?.data?.error || 'Ошибка сохранения', 'error');
@@ -123,54 +148,69 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
       toast('Мастер удалён');
       await onChanged();
     } catch (err) {
-      const msg = err.response?.data?.error || '';
-      if (msg.includes('есть будущие записи')) {
-        alert(msg);
+      const errMsg = err.response?.data?.error || '';
+      if (errMsg.includes('есть будущие записи')) {
+        alert(errMsg);
       } else {
-        toast(msg || 'Ошибка', 'error');
+        toast(errMsg || 'Ошибка', 'error');
       }
     }
   };
 
   const active = masters.filter((m) => m.is_active !== false);
+  const photoSrc = photoPreview || (form.photo_url ? mediaUrl(form.photo_url) : null);
+  const isEdit = Boolean(form.id);
 
   return (
     <Card>
       <CardHeader
         title="Мастера салона"
-        action={<Button size="sm" onClick={() => openEdit()}>+ Добавить</Button>}
+        action={
+          <Button size="sm" onClick={() => openEdit()}>
+            + Добавить
+          </Button>
+        }
       />
-      <p className="text-sm text-admin-textSecondary mb-4">
-        У каждого мастера своё расписание, услуги, доля с услуги и отдельный вход в кабинет.
+      <p className="mb-4 text-sm text-admin-textSecondary">
+        У каждого — своё расписание, услуги и вход в кабинет.
       </p>
       {active.length === 0 ? (
-        <p className="text-sm text-admin-textMuted py-6 text-center">Добавьте хотя бы одного мастера</p>
+        <p className="py-6 text-center text-sm text-admin-textMuted">Добавьте хотя бы одного мастера</p>
       ) : (
         <ul className="space-y-3">
           {active.map((m) => (
-            <li key={m.id} className="flex gap-4 items-center rounded-xl border border-admin-border p-3 bg-white">
-              <div className="h-14 w-14 shrink-0 rounded-xl overflow-hidden bg-admin-accentSoft">
+            <li
+              key={m.id}
+              className="flex items-center gap-4 rounded-xl border border-admin-border/70 bg-white p-3 transition hover:border-violet-200/80"
+            >
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-admin-accentSoft ring-1 ring-admin-border/60">
                 {m.photo_url ? (
                   <img src={mediaUrl(m.photo_url)} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center font-bold text-admin-accent">
+                  <div className="flex h-full w-full items-center justify-center text-lg font-bold text-admin-accent">
                     {m.name?.[0]}
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-admin-text">{m.name}</p>
-                {m.specialty && <p className="text-xs text-admin-textMuted">{m.specialty}</p>}
-                <p className="text-xs text-admin-textMuted mt-1">
-                  Слот: {m.slot_step_minutes} мин · Доля: {m.commission_percent ?? 0}%
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-admin-text">{m.name}</p>
+                {m.specialty && <p className="truncate text-xs text-admin-textMuted">{m.specialty}</p>}
+                <p className="mt-1 text-[11px] text-admin-textMuted">
+                  {m.slot_step_minutes} мин · {m.commission_percent ?? 0}%
                   {m.email ? ` · ${m.email}` : ''}
                 </p>
               </div>
-              <div className="flex gap-2 shrink-0">
-                <Button size="sm" variant="secondary" onClick={() => openEdit(m)}>Изменить</Button>
-                <Button size="sm" variant="ghost" onClick={() => handleDelete(m)}>Удалить</Button>
+              <div className="flex shrink-0 gap-1.5">
+                <Button size="sm" variant="soft" onClick={() => openEdit(m)}>
+                  Изменить
+                </Button>
+                <Button size="sm" variant="ghost" className="!text-red-600" onClick={() => handleDelete(m)}>
+                  Удалить
+                </Button>
                 {active.length > 1 && (
-                  <Button size="sm" variant="ghost" onClick={() => handleDeactivate(m.id)}>Скрыть</Button>
+                  <Button size="sm" variant="ghost" onClick={() => handleDeactivate(m.id)}>
+                    Скрыть
+                  </Button>
                 )}
               </div>
             </li>
@@ -178,50 +218,119 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
         </ul>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={form.id ? 'Редактировать мастера' : 'Новый мастер'}>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Имя" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input label="Специализация" value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} />
-          <Textarea label="Описание" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Шаг слотов (мин)"
-              type="number"
-              min={15}
-              max={480}
-              step={5}
-              value={form.slot_step_minutes}
-              onChange={(e) => setForm({ ...form, slot_step_minutes: e.target.value })}
-            />
-            <Input
-              label="Доля мастера, %"
-              type="number"
-              min={0}
-              max={100}
-              value={form.commission_percent}
-              onChange={(e) => setForm({ ...form, commission_percent: e.target.value })}
-            />
-          </div>
-          <Input
-            label="Email для входа"
-            type="email"
-            required={!form.id}
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-          />
-          <Input
-            label={form.id ? 'Новый пароль (необязательно)' : 'Пароль для входа'}
-            type="password"
-            required={!form.id}
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            hint="Минимум 6 символов"
-          />
-          <div>
-            <label className="block text-sm font-medium text-admin-text mb-1">Фото</label>
-            <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} />
-          </div>
-          <Button type="submit" loading={saving} className="w-full">Сохранить</Button>
+      <Modal
+        open={showModal}
+        onClose={closeModal}
+        title={isEdit ? 'Мастер' : 'Новый мастер'}
+        description={isEdit ? 'Профиль, запись и доступ в кабинет' : 'Заполните основное — остальное можно позже'}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeModal} disabled={saving}>
+              Отмена
+            </Button>
+            <Button type="submit" form="salon-master-form" loading={saving}>
+              Сохранить
+            </Button>
+          </>
+        }
+      >
+        <form id="salon-master-form" onSubmit={handleSubmit} className="space-y-3">
+          <FormSection title="Профиль">
+            <div className="flex gap-4">
+              <label className="group relative shrink-0 cursor-pointer">
+                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white ring-2 ring-admin-border/80 transition group-hover:ring-admin-accent/40">
+                  {photoSrc ? (
+                    <img src={photoSrc} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <UserRound className="h-7 w-7 text-admin-textMuted" strokeWidth={1.5} />
+                  )}
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-admin-accent text-white shadow-md">
+                  <Camera className="h-3.5 w-3.5" />
+                </span>
+                <input type="file" accept="image/*" className="sr-only" onChange={handlePhotoChange} />
+              </label>
+              <div className="min-w-0 flex-1 space-y-3">
+                <Input
+                  label="Имя"
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="Анна"
+                />
+                <Input
+                  label="Специализация"
+                  value={form.specialty}
+                  onChange={(e) => setForm({ ...form, specialty: e.target.value })}
+                  placeholder="Стилист"
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <Textarea
+                label="Описание"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={2}
+                placeholder="Коротко о мастере для страницы записи"
+              />
+            </div>
+          </FormSection>
+
+          <FormSection title="Запись">
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Шаг слотов"
+                type="number"
+                min={15}
+                max={480}
+                step={5}
+                value={form.slot_step_minutes}
+                onChange={(e) => setForm({ ...form, slot_step_minutes: e.target.value })}
+                hint="минут"
+              />
+              <Input
+                label="Доля мастера"
+                type="number"
+                min={0}
+                max={100}
+                value={form.commission_percent}
+                onChange={(e) => setForm({ ...form, commission_percent: e.target.value })}
+                hint="% от услуги"
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-admin-textMuted">
+              <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 ring-1 ring-admin-border/60">
+                <Timer className="h-3 w-3" />
+                Интервал записи
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 ring-1 ring-admin-border/60">
+                <Percent className="h-3 w-3" />
+                Для отчётов
+              </span>
+            </div>
+          </FormSection>
+
+          <FormSection title="Вход в кабинет">
+            <div className="space-y-3">
+              <Input
+                label="Email"
+                type="email"
+                required={!isEdit}
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                placeholder="master@example.com"
+              />
+              <Input
+                label={isEdit ? 'Новый пароль' : 'Пароль'}
+                type="password"
+                required={!isEdit}
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder={isEdit ? 'Оставьте пустым, если не меняете' : 'Минимум 6 символов'}
+              />
+            </div>
+          </FormSection>
         </form>
       </Modal>
     </Card>

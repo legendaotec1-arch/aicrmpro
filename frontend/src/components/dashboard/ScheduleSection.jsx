@@ -1,10 +1,18 @@
-import { useState } from 'react';
-import { Calendar, Clock, Save, Trash2, Plus, ChevronDown, ChevronUp } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Calendar, Clock, Save, Trash2, Plus, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import { DAYS } from '../../lib/format';
 import { getRuHolidays } from '../../lib/ruHolidays';
+
+function localTodayKey() {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+function exceptionDateKey(ex) {
+  return String(ex.exception_date).slice(0, 10);
+}
 
 export default function ScheduleSection({
   scheduleDraft,
@@ -22,6 +30,11 @@ export default function ScheduleSection({
 }) {
   const [showExceptions, setShowExceptions] = useState(true);
   const holidays = getRuHolidays(new Date().getFullYear());
+  const todayKey = localTodayKey();
+  const upcomingExceptions = useMemo(
+    () => (exceptions || []).filter((ex) => exceptionDateKey(ex) >= todayKey),
+    [exceptions, todayKey]
+  );
 
   const getDayStyle = (day) => {
     if (day.is_day_off) {
@@ -119,7 +132,9 @@ export default function ScheduleSection({
             <div className="text-left">
               <h3 className="font-semibold text-admin-text">Исключения и праздники</h3>
               <p className="text-sm text-admin-textSecondary">
-                {exceptions?.length || 0} сохранённых дней • Праздники РФ подсвечены
+                {upcomingExceptions.length
+                  ? `${upcomingExceptions.length} предстоящих дней • прошедшие удаляются автоматически`
+                  : 'Отметьте выходной или короткий день на конкретную дату'}
               </p>
             </div>
           </div>
@@ -146,18 +161,26 @@ export default function ScheduleSection({
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded bg-red-100 border border-red-300" />
-                Выходной
+                Выходной — слотов нет
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded bg-green-100 border border-green-300" />
-                Рабочий день
+                Короткий день — слоты по времени
               </span>
             </div>
 
-            {exceptions && exceptions.length > 0 ? (
+            <div className="mb-4 flex gap-2 rounded-xl border border-sky-100 bg-sky-50/80 px-3 py-2.5 text-xs text-sky-900">
+              <Info className="h-4 w-4 shrink-0 text-sky-600" />
+              <p>
+                Выходной закрывает запись на весь день. Короткий день — только в указанные часы.
+                После наступления даты исключение исчезает из списка само.
+              </p>
+            </div>
+
+            {upcomingExceptions.length > 0 ? (
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {exceptions.map((ex) => {
-                  const key = String(ex.exception_date).slice(0, 10);
+                {upcomingExceptions.map((ex) => {
+                  const key = exceptionDateKey(ex);
                   const isHoliday = holidays.has(key);
                   return (
                     <div
@@ -177,8 +200,8 @@ export default function ScheduleSection({
                         <p className="text-xs text-admin-textMuted">
                           {isHoliday && `${holidays.get(key)} • `}
                           {ex.is_working
-                            ? `Рабочий: ${ex.start_time?.slice(0, 5)}–${ex.end_time?.slice(0, 5)}`
-                            : 'Выходной'}
+                            ? `Короткий день: ${ex.start_time?.slice(0, 5)}–${ex.end_time?.slice(0, 5)}`
+                            : 'Выходной — запись закрыта'}
                         </p>
                       </div>
                       <Button size="sm" variant="ghost" onClick={() => onExceptionDelete(ex.id)}>
@@ -190,7 +213,7 @@ export default function ScheduleSection({
               </div>
             ) : (
               <p className="text-sm text-admin-textMuted text-center py-6">
-                Нет сохранённых исключений. Нажмите "Добавить" чтобы отметить праздник или выходной.
+                Нет предстоящих исключений. Нажмите «Добавить», чтобы отметить выходной или короткий день.
               </p>
             )}
           </div>

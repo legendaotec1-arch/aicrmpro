@@ -25,6 +25,7 @@ import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 import { PageLoader } from '../components/ui/Spinner';
 import MessengerLabel from '../components/brand/MessengerLabel';
+import BrandName from '../components/brand/BrandName';
 import ClientAuthGate from '../components/client/ClientAuthGate';
 import ClientReviewsPanel from '../components/client/ClientReviewsPanel';
 import MasterCallButton from '../components/client/MasterCallButton';
@@ -659,7 +660,7 @@ export default function ClientPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [booking, setBooking] = useState(false);
-  const [clientAuth, setClientAuth] = useState({ channel: 'telegram', userId: 'temp-test-user', firstName: 'Гость' });
+  const [clientAuth, setClientAuth] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [rescheduleId, setRescheduleId] = useState(null);
   const [rescheduleLoading, setRescheduleLoading] = useState(false);
@@ -755,16 +756,9 @@ export default function ClientPage() {
 
   useEffect(() => {
     const session = resolveAuthFromUrl();
-    if (session) setClientAuth(session);
+    setClientAuth(session || null);
     setAuthChecked(true);
   }, [resolveAuthFromUrl]);
-
-  // TEMPORARY: Auto-set temp auth for testing (remove this block when re-enabling auth)
-  useEffect(() => {
-    if (authChecked && !clientAuth) {
-      setClientAuth({ channel: 'telegram', userId: 'temp-test-user', firstName: 'Гость' });
-    }
-  }, [authChecked, clientAuth]);
 
   useEffect(() => {
     loadMasterData();
@@ -782,7 +776,7 @@ export default function ClientPage() {
     if (clientAuth?.firstName && isValidClientName(clientAuth.firstName) && !formData.name) {
       setFormData((prev) => ({ ...prev, name: clientAuth.firstName }));
     }
-  }, [clientAuth.firstName, formData.name]);
+  }, [clientAuth?.firstName, formData.name]);
 
   useEffect(() => {
     if (!clientAuth || !masterId) return;
@@ -1058,81 +1052,45 @@ export default function ClientPage() {
     );
   }
 
-  // ============================================================
-  // AUTH GATE — TEMPORARILY DISABLED FOR TESTING
-  // ============================================================
-  // if (authChecked && !clientAuth) {
-  //   return (
-  //     <ClientThemeRoot themeId={clientThemeId}>
-  //       <div
-  //         style={{
-  //           minHeight: '100dvh',
-  //           background: PREMIUM.bgGradient,
-  //           display: 'flex',
-  //           flexDirection: 'column',
-  //         }}
-  //       >
-  //         {/* Header */}
-  //         <header
-  //           style={{
-  //             paddingTop: 'env(safe-area-inset-top)',
-  //             background: 'rgba(255, 255, 255, 0.75)',
-  //             backdropFilter: PREMIUM.blurHeavy,
-  //             WebkitBackdropFilter: PREMIUM.blurHeavy,
-  //             borderBottom: `1px solid ${PREMIUM.borderCard}`,
-  //             position: 'sticky',
-  //             top: 0,
-  //             zIndex: 50,
-  //           }}
-  //         >
-  //           <div style={{ maxWidth: '480px', margin: '0 auto', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-  //             <ClientSalonHeader master={master} title={title} />
-  //           </ClientThemeRoot>
-  //         </header>
-  //
-  //         {/* Auth content */}
-  //         <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-  //           <ClientAuthGate
-  //             master={master}
-  //             masterIdEncoded={masterId}
-  //             telegramBotUsername={bookingConfig?.telegramBotUsername}
-  //             telegramBotDeepLink={bookingConfig?.telegramBotDeepLink}
-  //             maxBotDeepLink={bookingConfig?.maxBotDeepLink}
-  //             onAuthenticated={handleAuthenticated}
-  //           />
-  //         </main>
-  //       </ClientThemeRoot>
-  //     </ClientThemeRoot>
-  //   );
-  // }
-  //
-  // if (!clientAuth) {
-  //   return (
-  //     <div
-  //       style={{
-  //         minHeight: '100dvh',
-  //         background: PREMIUM.bgGradient,
-  //         display: 'flex',
-  //         alignItems: 'center',
-  //         justifyContent: 'center',
-  //       }}
-  //     >
-  //       <div
-  //         style={{
-  //           width: 48,
-  //           height: 48,
-  //           border: '4px solid rgba(217, 122, 82, 0.2)',
-  //           borderTopColor: PREMIUM.accent,
-  //           borderRadius: '50%',
-  //           animation: 'spin 0.8s linear infinite',
-  //         }}
-  //       />
-  //     </ClientThemeRoot>
-  //   );
-  // }
+  if (!authChecked) {
+    return (
+      <div
+        style={{
+          minHeight: '100dvh',
+          background: PREMIUM.bgGradient,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            border: '4px solid rgba(217, 122, 82, 0.2)',
+            borderTopColor: PREMIUM.accent,
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+          }}
+        />
+      </div>
+    );
+  }
 
-  // TEMPORARY: Use temp auth when real auth is not available
-  const effectiveClientAuth = clientAuth || { channel: 'telegram', userId: 'temp-test-user', firstName: 'Гость' };
+  if (!clientAuth) {
+    return (
+      <ClientThemeRoot themeId={clientThemeId}>
+        <ClientAuthGate
+          master={master}
+          masterIdEncoded={masterId}
+          telegramBotUsername={bookingConfig?.telegramBotUsername}
+          telegramBotDeepLink={bookingConfig?.telegramBotDeepLink}
+          maxBotDeepLink={bookingConfig?.maxBotDeepLink}
+          onAuthenticated={handleAuthenticated}
+        />
+      </ClientThemeRoot>
+    );
+  }
 
   // ============================================================
   // MAIN APP
@@ -1189,16 +1147,13 @@ export default function ClientPage() {
               gap: '12px',
             }}
           >
-            <span
+            <BrandName
               style={{
                 fontSize: '18px',
-                fontWeight: '800',
                 color: PREMIUM.accent,
-                letterSpacing: '-0.02em',
+                letterSpacing: '-0.02em'
               }}
-            >
-              woner.ru
-            </span>
+            />
 
             {/* Desktop tab navigation */}
             <div

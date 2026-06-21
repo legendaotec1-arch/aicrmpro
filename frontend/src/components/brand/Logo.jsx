@@ -1,10 +1,14 @@
+import BrandName from './BrandName';
+
 export default function Logo({ className = '', light = false, iconOnly = false }) {
   return (
     <div className={`flex items-center gap-2.5 ${className}`}>
       {!iconOnly && (
-        <span className={`font-display text-xl font-black tracking-tight ${light ? 'text-white' : 'text-ink'}`}>
-          woner<span className={light ? 'text-violet-200' : 'text-primary'}>.ru</span>
-        </span>
+        <BrandName
+          as="span"
+          light={light}
+          className={`font-display text-xl tracking-tight ${light ? '' : 'text-ink'}`}
+        />
       )}
     </div>
   );

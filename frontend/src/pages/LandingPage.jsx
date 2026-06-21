@@ -10,6 +10,7 @@ import {
   Link2
 } from 'lucide-react';
 import { LANDING_MASTERS } from '../config/landingMasters';
+import BrandName from '../components/brand/BrandName';
 import Button from '../components/ui/Button';
 import IconBox from '../components/ui/IconBox';
 import HeroMockups from '../components/landing/HeroMockups';
@@ -66,7 +67,7 @@ export default function LandingPage() {
                 </h1>
 
                 <p className="mt-3 text-lg font-semibold text-[#2b2b2b] sm:text-xl">
-                  <span className="font-black text-primary">woner.ru</span> — больше чем бизнес
+                  <BrandName className="text-primary" /> — больше чем бизнес
                 </p>
 
                 <p className="mt-3 mb-6 max-w-lg text-base text-slate-600 leading-relaxed sm:text-lg">

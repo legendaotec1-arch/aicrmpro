@@ -12,33 +12,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Auto-delete past schedule exceptions on startup
-async function cleanupPastScheduleExceptions() {
+async function cleanupPastScheduleExceptionsOnStartup() {
   try {
     const db = require('./config/database');
-    const today = new Date().toISOString().split('T')[0];
-    const result = await db.query(
-      "DELETE FROM schedule_exceptions WHERE exception_date < $1",
-      [today]
-    );
-    if (result.rowCount > 0) {
-      console.log(`[cleanup] Removed ${result.rowCount} past schedule exception(s)`);
-    }
-  } catch (err) {
-    console.error('[cleanup] Failed to delete past schedule exceptions:', err.message);
-  }
-}
-
-// Auto-delete past schedule exceptions on startup
-async function cleanupPastScheduleExceptions() {
-  try {
-    const db = require('./config/database');
-    const today = new Date().toISOString().split('T')[0];
-    const result = await db.query(
-      "DELETE FROM schedule_exceptions WHERE exception_date < $1",
-      [today]
-    );
-    if (result.rowCount > 0) {
-      console.log(`[cleanup] Removed ${result.rowCount} past schedule exception(s)`);
+    const { cleanupPastScheduleExceptions } = require('./utils/scheduleExceptions');
+    const removed = await cleanupPastScheduleExceptions(db);
+    if (removed > 0) {
+      console.log(`[cleanup] Removed ${removed} past schedule exception(s)`);
     }
   } catch (err) {
     console.error('[cleanup] Failed to delete past schedule exceptions:', err.message);
@@ -122,7 +102,7 @@ function assertFrontendDist() {
 assertFrontendDist();
 
 app.listen(PORT, async () => {
-  await cleanupPastScheduleExceptions();
+  await cleanupPastScheduleExceptionsOnStartup();
   console.log(`Сервер запущен на порту ${PORT}`);
 });
 

@@ -53,37 +53,44 @@ async function getAvailableSlots(db, {
   const dateStr = String(date).split('T')[0];
   const dayOfWeek = new Date(`${dateStr}T12:00:00`).getDay();
 
-  const schedule = await db.query(
-    `SELECT * FROM work_schedule
-     WHERE salon_master_id = $1 AND day_of_week = $2 AND is_day_off = false`,
-    [salonMasterId, dayOfWeek]
-  );
-
-  if (schedule.rows.length === 0) {
-    return [];
-  }
-
-  const { start_time, end_time } = schedule.rows[0];
-
   const exception = await db.query(
     `SELECT * FROM schedule_exceptions
      WHERE salon_master_id = $1 AND TO_CHAR(exception_date, 'YYYY-MM-DD') = $2`,
     [salonMasterId, dateStr]
   );
+  const ex = exception.rows[0];
 
-  if (exception.rows.length > 0 && !exception.rows[0].is_working) {
+  // Выходной по исключению — слотов нет
+  if (ex && !ex.is_working) {
     return [];
   }
 
-  const exceptionStartTime = exception.rows[0]?.start_time;
-  const exceptionEndTime = exception.rows[0]?.end_time;
-
-  const slots = generateTimeSlots(
-    exceptionStartTime || start_time,
-    exceptionEndTime || end_time,
-    stepMinutes,
-    dateStr
+  const schedule = await db.query(
+    `SELECT * FROM work_schedule
+     WHERE salon_master_id = $1 AND day_of_week = $2`,
+    [salonMasterId, dayOfWeek]
   );
+  const sched = schedule.rows[0];
+
+  let startTime;
+  let endTime;
+
+  if (ex && ex.is_working) {
+    // Короткий / особый рабочий день — только выбранные часы
+    startTime = ex.start_time;
+    endTime = ex.end_time;
+    if (!startTime || !endTime) {
+      return [];
+    }
+  } else if (!sched || sched.is_day_off) {
+    // Обычный выходной по недельному расписанию
+    return [];
+  } else {
+    startTime = sched.start_time;
+    endTime = sched.end_time;
+  }
+
+  const slots = generateTimeSlots(startTime, endTime, stepMinutes, dateStr);
 
   const booked = await db.query(
     `SELECT appointment_time, duration_minutes FROM appointments

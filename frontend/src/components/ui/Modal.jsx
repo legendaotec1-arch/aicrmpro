@@ -30,7 +30,7 @@ export default function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden />
       <div
-        className={`relative w-full ${widths[size]} animate-slide-up rounded-2xl bg-white shadow-xl max-h-[90vh] overflow-hidden flex flex-col`}
+        className={`relative w-full min-w-0 ${widths[size]} animate-slide-up rounded-2xl bg-white shadow-xl max-h-[90vh] overflow-hidden flex flex-col`}
         role="dialog"
         aria-modal="true"
       >
@@ -40,10 +40,10 @@ export default function Modal({
             {description && <p className="mt-1 text-sm text-admin-textSecondary">{description}</p>}
           </div>
         )}
-        <div className={`flex-1 overflow-y-auto ${bleed ? '' : 'p-5'}`}>{children}</div>
+        <div className={`flex-1 min-w-0 w-full overflow-y-auto ${bleed ? '' : 'p-5'}`}>{children}</div>
         {footer !== undefined ? (
           footer !== null && (
-            <div className="shrink-0 px-5 pb-5 flex gap-3 justify-end border-t border-admin-border pt-4">{footer}</div>
+            <div className="shrink-0 w-full min-w-0 px-5 pb-5 flex flex-wrap gap-2 sm:gap-3 justify-end border-t border-admin-border pt-4">{footer}</div>
           )
         ) : (
           <div className="shrink-0 px-5 pb-5 border-t border-admin-border pt-4">

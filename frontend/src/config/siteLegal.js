@@ -1,6 +1,8 @@
+import { BRAND_NAME } from './brand';
+
 /** Реквизиты и контакты для юридических страниц и подвала */
 export const SITE_LEGAL = {
-  serviceName: 'woner.ru',
+  serviceName: BRAND_NAME,
   siteUrl: 'https://woner.ru',
   operatorName: 'ИП Рупасов Евгений Александрович',
   legalEntity: 'Индивидуальный предприниматель Рупасов Евгений Александрович',
@@ -14,5 +16,5 @@ export const SITE_LEGAL = {
   privacyPolicyEffectiveDate: '14.05.2025',
   paymentPolicyEffectiveDate: '14.05.2025',
   metaDisclaimer:
-    'Компания Meta Platforms Inc., а также принадлежащие ей социальные сети Instagram и Facebook, признаны экстремистскими организациями; деятельность Meta Platforms Inc. по реализации продуктов Instagram и Facebook на территории Российской Федерации запрещена. Упоминание Instagram на сайте сервиса woner.ru не является рекламой социальной сети и означает только техническую возможность поделиться ссылкой на онлайн-запись. woner.ru не связан с Meta Platforms Inc., не одобрен ею и не предоставляет услуги от её имени.'
+    'Компания Meta Platforms Inc., а также принадлежащие ей социальные сети Instagram и Facebook, признаны экстремистскими организациями; деятельность Meta Platforms Inc. по реализации продуктов Instagram и Facebook на территории Российской Федерации запрещена. Упоминание Instagram на сайте сервиса Woner.ru не является рекламой социальной сети и означает только техническую возможность поделиться ссылкой на онлайн-запись. Woner.ru не связан с Meta Platforms Inc., не одобрен ею и не предоставляет услуги от её имени.'
 };

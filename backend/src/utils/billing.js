@@ -71,13 +71,13 @@ function evaluateOnlineBooking(row) {
   if (balance < CRITICAL_BALANCE) {
     return {
       allowed: false,
-      reason: 'Онлайн-запись временно недоступна. Пополните баланс в личном кабинете мастера.'
+      reason: 'Запись временно недоступна. Пополните баланс в личном кабинете мастера.'
     };
   }
 
   return {
     allowed: false,
-    reason: 'Недостаточно средств для онлайн-записи. Пополните баланс в личном кабинете мастера.'
+    reason: 'Недостаточно средств для записи. Пополните баланс в личном кабинете мастера.'
   };
 }
 
@@ -155,7 +155,7 @@ async function checkAndSendBalanceAlerts(masterRow, client = db) {
   }
 }
 
-async function chargeOnlineBookingFee(masterId, appointmentId) {
+async function chargeBookingFee(masterId, appointmentId, { context = 'online' } = {}) {
   if (!isBillingEnabled()) return { charged: false };
 
   const client = await db.connect();
@@ -177,7 +177,10 @@ async function chargeOnlineBookingFee(masterId, appointmentId) {
     const booking = evaluateOnlineBooking(row);
     if (!booking.allowed) {
       await client.query('ROLLBACK');
-      const err = new Error(booking.reason || 'Онлайн-запись недоступна');
+      const manualMessage = 'Недостаточно средств на балансе. Пополните баланс для создания записи.';
+      const err = new Error(
+        context === 'manual' ? manualMessage : (booking.reason || 'Запись недоступна')
+      );
       err.code = 'BOOKING_BLOCKED';
       err.status = 403;
       throw err;
@@ -190,6 +193,10 @@ async function chargeOnlineBookingFee(masterId, appointmentId) {
 
     const balanceBefore = Number(row.balance);
     const balanceAfter = balanceBefore - PER_BOOKING_FEE;
+    const feeLabel =
+      context === 'manual'
+        ? `Списание за запись в кабинете (${PER_BOOKING_FEE} ₽)`
+        : `Списание за онлайн-запись (${PER_BOOKING_FEE} ₽)`;
 
     await client.query(
       `UPDATE masters SET balance = $1, updated_at = NOW() WHERE id = $2`,
@@ -204,7 +211,7 @@ async function chargeOnlineBookingFee(masterId, appointmentId) {
         -PER_BOOKING_FEE,
         balanceAfter,
         appointmentId,
-        `Списание за онлайн-запись (${PER_BOOKING_FEE} ₽)`
+        feeLabel
       ]
     );
 
@@ -414,7 +421,8 @@ module.exports = {
   evaluateOnlineBooking,
   getMasterBillingRow,
   listBillingTransactions,
-  chargeOnlineBookingFee,
+  chargeBookingFee,
+  chargeOnlineBookingFee: chargeBookingFee,
   applyTopup,
   applyUnlimitedPurchase,
   setAutoRenew,

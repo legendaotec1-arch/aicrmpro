@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, Phone, ExternalLink } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { AuthContext } from '../App';
 import { useToast } from '../context/ToastContext';
 import DashboardLayout from '../components/layout/DashboardLayout';
@@ -10,13 +10,10 @@ import Input from '../components/ui/Input';
 import Textarea from '../components/ui/Textarea';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
-import MaxLogo from '../components/brand/MaxLogo';
-import { IconTelegram } from '../components/brand/SocialBrandIcons';
 import EmptyState from '../components/ui/EmptyState';
 import { PageLoader } from '../components/ui/Spinner';
 import BookingLinkCard from '../components/dashboard/BookingLinkCard';
 import { DAYS, STATUS_LABELS, formatDate, formatDateTime, formatPrice, formatServicePrice } from '../lib/format';
-import { formatRuPhoneDisplay, isRuPhoneComplete, toTelHref } from '../lib/phoneRu';
 import { mediaUrl } from '../lib/media';
 import TeamMasterSelect from '../components/dashboard/TeamMasterSelect';
 import SalonMastersSection from '../components/dashboard/SalonMastersSection';
@@ -33,12 +30,15 @@ import ThemesSection from '../components/dashboard/ThemesSection';
 import MasterSocialLinksCard from '../components/dashboard/MasterSocialLinksCard';
 import ScheduleSection from '../components/dashboard/ScheduleSection';
 import BillingSection from '../components/dashboard/BillingSection';
-import BlacklistSection from '../components/dashboard/BlacklistSection';
 import VideoReelCard from '../components/dashboard/VideoReelCard';
 import ServicePriceModal from '../components/dashboard/ServicePriceModal';
 import OverviewStatsCard from '../components/dashboard/OverviewStatsCard';
+import RecentClientsCard from '../components/dashboard/RecentClientsCard';
 import AppointmentsSection from '../components/dashboard/AppointmentsSection';
+import PortfolioSection from '../components/dashboard/PortfolioSection';
 import ManualBookModal from '../components/dashboard/ManualBookModal';
+import AppointmentDetailModal from '../components/dashboard/AppointmentDetailModal';
+import { appointmentClientForAvatar } from '../lib/appointments';
 import { MASTER_SOCIAL_FIELDS } from '../lib/socialLinks';
 
 function buildScheduleDraft(apiSchedule) {
@@ -57,8 +57,20 @@ export default function MasterDashboard() {
   const { toast } = useToast();
   const isTeamMember = user?.role === 'team';
   const TEAM_SECTIONS = useMemo(
-    () => new Set(['overview', 'appointments', 'clients', 'schedule', 'prices', 'portfolio', 'links', 'blacklist']),
+    () => new Set(['overview', 'appointments', 'clients', 'schedule', 'prices', 'profile']),
     []
+  );
+  const profileTabs = useMemo(
+    () =>
+      isTeamMember
+        ? [{ id: 'portfolio', label: 'Портфолио' }]
+        : [
+            { id: 'main', label: 'Профиль' },
+            { id: 'portfolio', label: 'Портфолио' },
+            { id: 'contacts', label: 'Контакты' },
+            { id: 'socials', label: 'Соцсети' }
+          ],
+    [isTeamMember]
   );
 
   const [loading, setLoading] = useState(true);
@@ -102,6 +114,7 @@ export default function MasterDashboard() {
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [resolveTarget, setResolveTarget] = useState(null);
   const [messageTarget, setMessageTarget] = useState(null);
   const [clientMessage, setClientMessage] = useState('');
 
@@ -133,19 +146,22 @@ export default function MasterDashboard() {
     [selectedSalonMasterId]
   );
 
+  const loadPortfolio = useCallback(async () => {
+    const res = await api.get('/master/me/portfolio');
+    setPortfolio(res.data);
+  }, [api]);
+
   const loadTeamScoped = useCallback(
     async (teamId) => {
       if (!teamId) return;
       const params = { params: { salonMasterId: teamId } };
-      const [scheduleRes, pricesRes, portfolioRes, exceptionsRes] = await Promise.all([
+      const [scheduleRes, pricesRes, exceptionsRes] = await Promise.all([
         api.get('/master/me/schedule', params),
         api.get('/master/me/prices', params),
-        api.get('/master/me/portfolio', params),
         api.get('/master/me/exceptions', params)
       ]);
       setScheduleDraft(buildScheduleDraft(scheduleRes.data));
       setPriceList(pricesRes.data);
-      setPortfolio(portfolioRes.data);
       setExceptions(exceptionsRes.data);
     },
     [api]
@@ -161,6 +177,7 @@ export default function MasterDashboard() {
       setAppointments(appointmentsRes.data);
       setClients(clientsRes.data);
       setLinks(linkRes.data.links);
+      await loadPortfolio();
 
       if (isTeamMember && user?.salonMasterId) {
         setProfile({
@@ -196,7 +213,7 @@ export default function MasterDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [api, toast, loadTeamScoped, selectedSalonMasterId, isTeamMember, user]);
+  }, [api, toast, loadTeamScoped, loadPortfolio, selectedSalonMasterId, isTeamMember, user]);
 
   const handleTeamMasterChange = async (teamId) => {
     if (isTeamMember) return;
@@ -221,19 +238,41 @@ export default function MasterDashboard() {
 
   useEffect(() => {
     const section = searchParams.get('section');
+    if (section === 'portfolio') {
+      setActiveSection('profile');
+      setProfileTab('portfolio');
+      setSearchParams({ section: 'profile' }, { replace: true });
+      return;
+    }
+    if (section === 'links') {
+      setActiveSection('overview');
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    if (section === 'blacklist') {
+      setActiveSection('clients');
+      setSearchParams({ section: 'clients', tab: 'blacklist' }, { replace: true });
+      return;
+    }
     if (section) {
       if (isTeamMember && !TEAM_SECTIONS.has(section)) {
         setActiveSection('overview');
       } else {
         setActiveSection(section);
+        if (section === 'profile' && isTeamMember) {
+          setProfileTab('portfolio');
+        }
       }
     }
-  }, [searchParams, isTeamMember, TEAM_SECTIONS]);
+  }, [searchParams, isTeamMember, TEAM_SECTIONS, setSearchParams]);
 
   const handleSectionChange = useCallback(
     (id) => {
       if (isTeamMember && !TEAM_SECTIONS.has(id)) return;
       setActiveSection(id);
+      if (id === 'profile' && isTeamMember) {
+        setProfileTab('portfolio');
+      }
       if (id === 'overview') setSearchParams({});
       else setSearchParams({ section: id });
     },
@@ -319,8 +358,8 @@ export default function MasterDashboard() {
       setShowExceptionModal(false);
       setExceptionForm({ exception_date: '', is_working: false, start_time: '09:00', end_time: '18:00' });
       loadData();
-    } catch {
-      toast('Ошибка сохранения', 'error');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Ошибка сохранения', 'error');
     }
   };
 
@@ -426,7 +465,6 @@ export default function MasterDashboard() {
       const fd = new FormData();
       fd.append('media', portfolioFile);
       fd.append('title', portfolioTitle);
-      fd.append('salonMasterId', selectedSalonMasterId || '');
       fd.append('media_type', portfolioFile.type.startsWith('video/') ? 'video' : 'image');
       await api.post('/master/me/portfolio', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast('Медиа добавлено');
@@ -443,7 +481,7 @@ export default function MasterDashboard() {
   const handlePortfolioDelete = async (id) => {
     if (!confirm('Удалить фото?')) return;
     try {
-      await api.delete(`/master/me/portfolio/${id}`, teamParams());
+      await api.delete(`/master/me/portfolio/${id}`);
       toast('Фото удалено');
       loadData();
     } catch {
@@ -463,21 +501,23 @@ export default function MasterDashboard() {
     }
   };
 
-  const handleAppointmentStatus = async (id, status) => {
-    try {
-      await api.put(`/appointments/${id}`, { status });
-      toast('Статус обновлён');
-      loadData();
-    } catch {
-      toast('Ошибка обновления', 'error');
-    }
+  const openResolveAppointment = (aptOrId, status) => {
+    const apt =
+      typeof aptOrId === 'string' ? appointments.find((a) => a.id === aptOrId) : aptOrId;
+    if (!apt) return;
+    setResolveTarget({ apt, status });
+    setShowAppointmentDetail(false);
   };
 
-  const handleResolveAppointment = async (id, status) => {
-    setResolvingAppointmentId(`${id}-${status}`);
+  const confirmResolveAppointment = async () => {
+    if (!resolveTarget) return;
+    const { apt, status } = resolveTarget;
+    setResolvingAppointmentId(`${apt.id}-${status}`);
     try {
-      await api.put(`/appointments/${id}`, { status });
+      await api.put(`/appointments/${apt.id}`, { status });
       toast(status === 'completed' ? 'Визит завершён' : 'Отмечена неявка');
+      setResolveTarget(null);
+      setSelectedAppointment(null);
       loadData();
     } catch {
       toast('Не удалось обновить запись', 'error');
@@ -645,11 +685,7 @@ export default function MasterDashboard() {
                             {new Date(apt.appointment_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-admin-accent to-purple-400 flex items-center justify-center shrink-0">
-                          <span className="text-xs font-bold text-white">
-                            {(apt.client_name || 'Г')[0].toUpperCase()}
-                          </span>
-                        </div>
+                        <ClientAvatar client={appointmentClientForAvatar(apt)} size="xs" />
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-admin-text truncate">{apt.client_name || 'Клиент'}</p>
                           <p className="text-xs text-admin-textMuted truncate">{apt.service_name}</p>
@@ -663,29 +699,11 @@ export default function MasterDashboard() {
             })()}
           </Card>
 
-          <Card className="overflow-hidden">
-            <CardHeader title="Последние клиенты" action={<Button size="sm" variant="ghost" onClick={() => setActiveSection('clients')}>Все</Button>} />
-            {clients.length === 0 ? (
-              <p className="text-sm text-admin-textMuted">Клиентов пока нет</p>
-            ) : (
-              <div className="space-y-2">
-                {clients.slice(0, 4).map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setSelectedClientId(c.id)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-admin-border/80 bg-white p-3 text-left transition hover:border-violet-200 hover:bg-violet-50/40"
-                  >
-                    <ClientAvatar client={c} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm text-admin-text truncate">{c.display_name || c.name || 'Клиент'}</p>
-                      <p className="text-xs text-admin-textMuted truncate">{c.phone_display || c.phone || c.client_phone || '—'}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </Card>
+          <RecentClientsCard
+            clients={clients}
+            onOpenClient={(c) => setSelectedClientId(c.id)}
+            onShowAll={() => setActiveSection('clients')}
+          />
           </div>
         </div>
       )}
@@ -699,7 +717,7 @@ export default function MasterDashboard() {
           appointments={appointments}
           onManualBook={() => setShowManualBook(true)}
           onOpenDetail={openAppointmentDetail}
-          onResolve={handleResolveAppointment}
+          onResolve={openResolveAppointment}
           resolvingId={resolvingAppointmentId}
         />
       )}
@@ -715,6 +733,13 @@ export default function MasterDashboard() {
       {activeSection === 'clients' && (
         <ClientsSection
           clients={clients}
+          api={api}
+          toast={toast}
+          initialTab={searchParams.get('tab') === 'blacklist' ? 'blacklist' : 'clients'}
+          onTabChange={(tab) => {
+            if (tab === 'blacklist') setSearchParams({ section: 'clients', tab: 'blacklist' });
+            else setSearchParams({ section: 'clients' });
+          }}
           onOpen={(client) => setSelectedClientId(client.id)}
           onMessage={openClientMessage}
           onDelete={setClientDeleteTarget}
@@ -813,132 +838,6 @@ export default function MasterDashboard() {
         </Card>
       )}
 
-      {activeSection === 'portfolio' && (
-        <div className="space-y-6">
-          {!isTeamMember && (
-            <TeamMasterSelect
-              masters={salonMasters}
-              value={selectedSalonMasterId}
-              onChange={handleTeamMasterChange}
-            />
-          )}
-          <Card>
-            <CardHeader title="Загрузить медиа" description="Фото или видео появятся на странице записи" />
-            <form onSubmit={handlePortfolioUpload} className="space-y-4">
-              <Input
-                label="Подпись"
-                value={portfolioTitle}
-                onChange={(e) => setPortfolioTitle(e.target.value)}
-                placeholder="Работа, кабинет, процесс..."
-              />
-
-              {/* File Drop Zone */}
-              <div>
-                <label className="label-field">Файл</label>
-                <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${portfolioFile ? 'border-admin-accent bg-admin-accentSoft' : 'border-admin-border hover:border-admin-accent/50 hover:bg-admin-bg'}`}>
-                  {portfolioFile ? (
-                    <div className="flex flex-col items-center gap-2 p-4">
-                      {portfolioFile.type.startsWith('video/') ? (
-                        <video src={URL.createObjectURL(portfolioFile)} className="h-16 w-16 object-cover rounded-lg" />
-                      ) : (
-                        <img src={URL.createObjectURL(portfolioFile)} alt="Preview" className="h-16 w-16 object-cover rounded-lg" />
-                      )}
-                      <div className="text-center">
-                        <p className="text-sm font-semibold text-admin-text truncate max-w-[200px]">{portfolioFile.name}</p>
-                        <p className="text-xs text-admin-textMuted">{(portfolioFile.size / 1024 / 1024).toFixed(2)} МБ</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.preventDefault(); setPortfolioFile(null); }}
-                        className="text-xs text-danger hover:underline"
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 p-4">
-                      <div className="w-12 h-12 rounded-full bg-admin-bg flex items-center justify-center">
-                        <svg className="w-6 h-6 text-admin-textMuted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                      <p className="text-sm text-admin-textMuted">Нажмите или перетащите файл сюда</p>
-                      <p className="text-xs text-admin-textMuted">JPG, PNG, MP4 — до 50 МБ</p>
-                    </div>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*,video/*"
-                    className="hidden"
-                    onChange={(e) => setPortfolioFile(e.target.files?.[0] || null)}
-                  />
-                </label>
-              </div>
-
-              {uploadingPortfolio && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-admin-textMuted">Загрузка...</span>
-                    <span className="text-admin-accent font-semibold">100%</span>
-                  </div>
-                  <div className="w-full h-2 bg-admin-bg rounded-full overflow-hidden">
-                    <div className="h-full bg-admin-accent rounded-full animate-pulse" style={{ width: '100%' }} />
-                  </div>
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                loading={uploadingPortfolio}
-                disabled={!portfolioFile}
-                className="w-full"
-              >
-                Загрузить
-              </Button>
-            </form>
-          </Card>
-          <Card>
-            {portfolio.length === 0 ? (
-              <EmptyState icon="▤" title="Медиа пока нет" description="Добавьте фото или видео для главной клиентской страницы" />
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {portfolio.map((item) => (
-                  <div key={item.id} className="group relative aspect-square overflow-hidden rounded-2xl bg-admin-surface border border-admin-border">
-                    {item.media_type === 'video' ? (
-                      <video src={mediaUrl(item.video_url)} className="h-full w-full object-cover" muted />
-                    ) : item.media_type === 'external_video' ? (
-                      <div className="flex h-full w-full flex-col items-center justify-center bg-admin-bg p-4 text-center text-admin-textMuted">
-                        <span className="text-3xl">▶</span>
-                        <span className="mt-2 text-xs break-all">{item.video_url}</span>
-                      </div>
-                    ) : (
-                      <img src={mediaUrl(item.image_url)} alt={item.title} className="h-full w-full object-cover" />
-                    )}
-                    <span className="absolute left-2 top-2 rounded-lg bg-black/70 px-2 py-1 text-[10px] font-bold uppercase text-white">
-                      {item.media_type === 'image' ? 'Фото' : 'Видео'}
-                    </span>
-                    {item.title && (
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
-                        <p className="text-white text-sm font-medium">{item.title}</p>
-                      </div>
-                    )}
-                    <div className="absolute top-2 right-2 flex gap-1 opacity-100 transition">
-                      <button
-                        type="button"
-                        onClick={() => handlePortfolioDelete(item.id)}
-                        className="rounded-lg bg-danger px-3 py-1.5 text-xs font-semibold text-white shadow-md hover:bg-danger/90 transition"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
-
       {activeSection === 'themes' && (
         <ThemesSection
           currentThemeId={profile?.client_theme}
@@ -950,30 +849,8 @@ export default function MasterDashboard() {
         />
       )}
 
-      {activeSection === 'links' && links && (
-        <div className="space-y-6">
-          <div>
-            <h1 className="font-display text-2xl font-bold text-admin-text">Ссылка для клиентов</h1>
-            <p className="mt-1 text-sm text-admin-textSecondary">
-              Одна ссылка для соцсетей, визитки и QR. На странице клиент сам выберет вход через Telegram или MAX.
-            </p>
-          </div>
-
-          <BookingLinkCard
-            url={links.client?.web || links.max?.web}
-            salonName={profile?.salon_name || profile?.name}
-            onCopied={(msg, tone) => toast(msg, tone || 'success')}
-            onQrError={(msg) => toast(msg, 'error')}
-          />
-        </div>
-      )}
-
       {activeSection === 'billing' && (
         <BillingSection api={api} toast={toast} />
-      )}
-
-      {activeSection === 'blacklist' && (
-        <BlacklistSection api={api} toast={toast} />
       )}
 
       {activeSection === 'profile' && (
@@ -985,16 +862,12 @@ export default function MasterDashboard() {
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-1 bg-admin-bg rounded-xl p-1">
-            {[
-              { id: 'main', label: 'Профиль' },
-              { id: 'contacts', label: 'Контакты' },
-              { id: 'socials', label: 'Соцсети' },
-            ].map((tab) => (
+          <div className="flex gap-1 overflow-x-auto bg-admin-bg rounded-xl p-1">
+            {profileTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setProfileTab(tab.id)}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border-2 ${
+                className={`flex-1 min-w-[88px] py-2.5 px-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border-2 whitespace-nowrap ${
                   profileTab === tab.id
                     ? 'bg-white text-admin-accent border-admin-accent shadow-sm'
                     : 'text-admin-textSecondary border-transparent hover:text-admin-text hover:bg-white/50'
@@ -1007,6 +880,22 @@ export default function MasterDashboard() {
 
           {/* Tab content */}
           <div className="rounded-xl bg-white border border-admin-border shadow-sm">
+
+            {profileTab === 'portfolio' && (
+              <div className="p-5 pb-8">
+                <PortfolioSection
+                  portfolio={portfolio}
+                  portfolioTitle={portfolioTitle}
+                  portfolioFile={portfolioFile}
+                  uploadingPortfolio={uploadingPortfolio}
+                  onTitleChange={setPortfolioTitle}
+                  onFileChange={setPortfolioFile}
+                  onClearFile={() => setPortfolioFile(null)}
+                  onUpload={handlePortfolioUpload}
+                  onDelete={handlePortfolioDelete}
+                />
+              </div>
+            )}
 
             {/* TAB: Main profile */}
             {profileTab === 'main' && (
@@ -1138,11 +1027,13 @@ export default function MasterDashboard() {
             )}
           </div>
 
-          <div className="pt-2">
-            <Button onClick={handleProfileUpdate} loading={savingProfile} className="w-full sm:w-auto">
-              Сохранить
-            </Button>
-          </div>
+          {(profileTab === 'main' || profileTab === 'socials') && (
+            <div className="pt-2">
+              <Button onClick={handleProfileUpdate} loading={savingProfile} className="w-full sm:w-auto">
+                Сохранить
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1164,17 +1055,27 @@ export default function MasterDashboard() {
         </>
       }>
         <form id="exception-form" onSubmit={handleExceptionSubmit} className="space-y-4">
-          <Input label="Дата" type="date" required value={exceptionForm.exception_date} onChange={(e) => setExceptionForm({ ...exceptionForm, exception_date: e.target.value })} />
+          <Input
+            label="Дата"
+            type="date"
+            required
+            min={new Date().toLocaleDateString('en-CA')}
+            value={exceptionForm.exception_date}
+            onChange={(e) => setExceptionForm({ ...exceptionForm, exception_date: e.target.value })}
+          />
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={exceptionForm.is_working} onChange={(e) => setExceptionForm({ ...exceptionForm, is_working: e.target.checked })} />
-            Особый рабочий день (иначе — выходной)
+            Короткий рабочий день (иначе — выходной, слотов не будет)
           </label>
           {exceptionForm.is_working && (
             <div className="grid grid-cols-2 gap-4">
-              <Input label="С" type="time" value={exceptionForm.start_time} onChange={(e) => setExceptionForm({ ...exceptionForm, start_time: e.target.value })} />
-              <Input label="До" type="time" value={exceptionForm.end_time} onChange={(e) => setExceptionForm({ ...exceptionForm, end_time: e.target.value })} />
+              <Input label="С" type="time" required value={exceptionForm.start_time} onChange={(e) => setExceptionForm({ ...exceptionForm, start_time: e.target.value })} />
+              <Input label="До" type="time" required value={exceptionForm.end_time} onChange={(e) => setExceptionForm({ ...exceptionForm, end_time: e.target.value })} />
             </div>
           )}
+          <p className="text-xs text-admin-textMuted">
+            Прошедшие даты удаляются автоматически на следующий день.
+          </p>
         </form>
       </Modal>
 
@@ -1257,143 +1158,64 @@ export default function MasterDashboard() {
         <Textarea value={clientMessage} onChange={(e) => setClientMessage(e.target.value)} placeholder="Напоминание или уточнение..." rows={4} />
       </Modal>
 
-      {/* Appointment Detail Modal */}
-      <Modal
+      <AppointmentDetailModal
         open={showAppointmentDetail}
-        onClose={() => { setShowAppointmentDetail(false); setSelectedAppointment(null); }}
-        title="Запись"
+        appointment={selectedAppointment}
+        contact={appointmentContact}
+        onClose={() => {
+          setShowAppointmentDetail(false);
+          setSelectedAppointment(null);
+        }}
+        onComplete={() => openResolveAppointment(selectedAppointment, 'completed')}
+        onCancel={() => openCancelAppointment(selectedAppointment)}
+        onMessage={openAppointmentMessage}
+      />
+
+      <Modal
+        open={!!resolveTarget}
+        onClose={() => setResolveTarget(null)}
+        title={resolveTarget?.status === 'completed' ? 'Завершить запись?' : 'Отметить неявку?'}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setShowAppointmentDetail(false)}>Закрыть</Button>
-            {selectedAppointment?.status === 'confirmed' && (
-              <>
-                <Button onClick={() => { handleAppointmentStatus(selectedAppointment.id, 'completed'); setShowAppointmentDetail(false); }}>Завершить</Button>
-                <Button variant="danger" onClick={() => openCancelAppointment(selectedAppointment)}>Отменить</Button>
-              </>
-            )}
+            <Button variant="secondary" onClick={() => setResolveTarget(null)}>
+              Отмена
+            </Button>
+            <Button
+              variant={resolveTarget?.status === 'no_show' ? 'danger' : 'primary'}
+              onClick={confirmResolveAppointment}
+              loading={!!resolveTarget && resolvingAppointmentId === `${resolveTarget.apt.id}-${resolveTarget.status}`}
+            >
+              {resolveTarget?.status === 'completed' ? 'Завершить' : 'Не пришёл'}
+            </Button>
           </>
         }
       >
-        {selectedAppointment && (() => {
-          const apt = selectedAppointment;
-          const st = STATUS_LABELS[apt.status] || STATUS_LABELS.confirmed;
-          const contactPhone = appointmentContact?.phone || apt.client_phone;
-          const phoneDisplay = formatRuPhoneDisplay(contactPhone);
-          const phoneComplete = isRuPhoneComplete(contactPhone);
-          const telHref = toTelHref(contactPhone);
-          const isTelegram = apt.client_messenger === 'telegram';
-          const telegramUrl = appointmentContact?.telegramUrl;
-          const canMessageViaBot = appointmentContact?.canMessage ?? !!(apt.telegram_user_id || apt.max_user_id);
-          return (
-            <div className="space-y-4">
-              {/* Status */}
-              <div className="flex items-center justify-between">
-                <span className={`text-sm font-semibold px-3 py-1 rounded-full ${
-                  st.tone === 'success' ? 'bg-green-100 text-green-700' :
-                  st.tone === 'danger' ? 'bg-red-100 text-red-700' :
-                  'bg-amber-100 text-amber-700'
-                }`}>
-                  {st.label}
-                </span>
-                <p className="text-sm text-admin-textMuted">
-                  {new Date(apt.appointment_time).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' })}
-                </p>
-              </div>
-
-              {/* Service info */}
-              <div className="rounded-xl bg-admin-bg p-4">
-                <p className="font-semibold text-admin-text">{apt.service_name}</p>
-                <p className="text-sm text-admin-accent font-bold mt-1">{formatPrice(apt.service_price)}</p>
-                <p className="text-sm text-admin-textMuted mt-1">
-                  {new Date(apt.appointment_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-                {apt.salon_master_name && (
-                  <p className="text-xs text-admin-textMuted mt-1">Мастер: {apt.salon_master_name}</p>
-                )}
-              </div>
-
-              {/* Client info */}
-              <div>
-                <p className="text-xs font-bold text-admin-textSecondary uppercase tracking-wide mb-2">Клиент</p>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-admin-accent to-purple-400 flex items-center justify-center">
-                    <span className="text-sm font-bold text-white">{(apt.client_name || 'Г')[0].toUpperCase()}</span>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-admin-text">{apt.client_name || 'Гость'}</p>
-                    {phoneComplete ? (
-                      <p className="text-sm text-admin-text mt-0.5">{phoneDisplay}</p>
-                    ) : (
-                      <p className="text-sm text-admin-textMuted mt-0.5">Телефон не указан</p>
-                    )}
-                    <div className="mt-1 flex items-center gap-1.5">
-                      {isTelegram ? (
-                        <IconTelegram className="h-3.5 w-3.5 text-sky-500" />
-                      ) : (
-                        <MaxLogo className="h-3.5 w-3.5" />
-                      )}
-                      <span className={`text-xs font-medium ${isTelegram ? 'text-sky-500' : 'text-blue-500'}`}>
-                        {isTelegram ? 'Telegram' : 'MAX'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {phoneComplete && telHref && (
-                    <a
-                      href={telHref}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm font-medium hover:bg-green-100 transition"
-                    >
-                      <Phone size={14} />
-                      {phoneDisplay}
-                    </a>
-                  )}
-                  {isTelegram && telegramUrl && (
-                    <a
-                      href={telegramUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 text-sm font-medium hover:bg-sky-100 transition"
-                    >
-                      <IconTelegram className="h-4 w-4" />
-                      Открыть в Telegram
-                      <ExternalLink size={12} className="opacity-60" />
-                    </a>
-                  )}
-                  {!isTelegram && canMessageViaBot && (
-                    <Button
-                      size="sm"
-                      variant="soft"
-                      onClick={() => openAppointmentMessage(apt)}
-                      className="!text-purple-700"
-                    >
-                      <MaxLogo className="h-4 w-4" />
-                      Написать в MAX
-                    </Button>
-                  )}
-                </div>
-                {isTelegram && telegramUrl?.startsWith('tg://') && (
-                  <p className="mt-2 text-xs text-admin-textMuted">
-                    Ссылка откроет личный чат в приложении Telegram
-                  </p>
-                )}
-                {!isTelegram && canMessageViaBot && (
-                  <p className="mt-2 text-xs text-admin-textMuted">
-                    В MAX личный чат открывается через бота — клиент уже авторизован у вас
-                  </p>
-                )}
-              </div>
-
-              {apt.client_notes && (
-                <div>
-                  <p className="text-xs font-bold text-admin-textSecondary uppercase tracking-wide mb-1">Заметка клиента</p>
-                  <p className="text-sm text-admin-textMuted">{apt.client_notes}</p>
-                </div>
+        {resolveTarget && (
+          <div className="space-y-3">
+            <p className="text-admin-text">
+              {resolveTarget.status === 'completed' ? (
+                <>
+                  Подтвердите завершение визита клиента{' '}
+                  <strong>{resolveTarget.apt.client_name || 'Гость'}</strong> —{' '}
+                  <strong>{resolveTarget.apt.service_name}</strong>.
+                </>
+              ) : (
+                <>
+                  Отметить, что клиент <strong>{resolveTarget.apt.client_name || 'Гость'}</strong> не пришёл на{' '}
+                  <strong>{resolveTarget.apt.service_name}</strong>?
+                </>
               )}
-            </div>
-          );
-        })()}
+            </p>
+            <p className="text-sm text-admin-textMuted">
+              {new Date(resolveTarget.apt.appointment_time).toLocaleString('ru-RU', {
+                day: 'numeric',
+                month: 'long',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </p>
+          </div>
+        )}
       </Modal>
 
       <Modal

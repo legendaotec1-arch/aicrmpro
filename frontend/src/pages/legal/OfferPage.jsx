@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import LegalPageLayout from '../../components/layout/LegalPageLayout';
+import BrandName from '../../components/brand/BrandName';
 import { SITE_LEGAL } from '../../config/siteLegal';
 
 function Section({ id, title, children }) {
@@ -26,13 +27,13 @@ export default function OfferPage() {
   return (
     <LegalPageLayout title="Публичная оферта на оказание услуг">
       <p className="text-slate-500 text-sm">
-        Сервис: <strong className="font-medium text-slate-700">{L.serviceName}</strong>
+        Сервис: <BrandName className="text-slate-700" />
       </p>
 
       <Section id="s1" title="1. Общие положения">
         <p>
           1.1. Настоящий документ является официальным предложением (офертой) {L.legalEntity} (далее — «Исполнитель»)
-          заключить договор на оказание услуг по предоставлению доступа к программному сервису {L.serviceName} (далее —
+          заключить договор на оказание услуг по предоставлению доступа к программному сервису <BrandName /> (далее —
           «Сервис»).
         </p>
         <p>
@@ -57,7 +58,7 @@ export default function OfferPage() {
       <Section id="s2" title="2. Предмет договора">
         <p>
           2.1. Исполнитель предоставляет Заказчику (мастеру, самозанятому, ИП, юридическому лицу) неисключительное
-          право использования облачной CRM-системы {L.serviceName} через сеть Интернет.
+          право использования облачной CRM-системы <BrandName /> через сеть Интернет.
         </p>
         <p>
           2.2. Функции Сервиса: онлайн-запись, кабинет мастера, страница записи клиентов, интеграции с мессенджерами,
@@ -109,7 +110,7 @@ export default function OfferPage() {
       <Section id="s4" title="4. Стоимость и порядок расчётов">
         <Sub title="4.1. Тариф «За запись»">
           <p>
-            20 (двадцать) рублей за каждого клиента, оформившего онлайн-запись через Сервис. Списание денежных средств
+            20 (двадцать) рублей за каждую запись через Сервис — онлайн или вручную в кабинете мастера. Списание денежных средств
             производится с внутреннего баланса Заказчика в момент создания записи.
           </p>
           <p>

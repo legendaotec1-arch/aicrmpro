@@ -10,6 +10,15 @@ export function isAppointmentPastDue(apt) {
   return appointmentEndMs(apt) <= Date.now();
 }
 
+/** Клиент для ClientAvatar из объекта записи */
+export function appointmentClientForAvatar(apt) {
+  return {
+    name: apt?.client_name,
+    display_name: apt?.client_name,
+    photo_url: apt?.client_photo_url || null
+  };
+}
+
 /** Показываем в списке «Записи» — только ожидающие визита */
 export function isActiveAppointmentListItem(apt) {
   return apt.status === 'confirmed';

@@ -14,7 +14,7 @@ const {
 } = require('../utils/clients');
 const { isRuPhoneComplete, normalizeRuPhoneForStorage } = require('../utils/phoneRu');
 const { validateBookingContact } = require('../utils/clientBookingValidation');
-const { resolveMasterId } = require('../utils/links');
+const { resolveMasterId, isResolvedMasterId } = require('../utils/links');
 const { getSalonMasterById } = require('../utils/salonMasters');
 const { getAvailableSlots } = require('../utils/bookingSlots');
 const { verifyTelegramLoginWidget } = require('../utils/telegramAuth');
@@ -90,6 +90,10 @@ router.post('/identify', async (req, res) => {
     if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
 
     const salonId = resolveMasterId(masterId);
+    if (!isResolvedMasterId(salonId)) {
+      return res.status(404).json({ error: 'Мастер не найден' });
+    }
+
     const messenger = normalizeChannel(channel);
     const messengerUserId = userId || (messenger === 'telegram' ? telegramUserId : maxUserId);
     if (!messengerUserId) return res.status(400).json({ error: 'Не авторизован' });
