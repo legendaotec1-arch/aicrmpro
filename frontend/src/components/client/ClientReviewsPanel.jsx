@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { withClientAuth } from '../../lib/clientApi';
 import { ImagePlus, X, Star } from 'lucide-react';
 import { formatDate } from '../../lib/format';
 import { ReviewPhotoFullscreen, ReviewPhotoThumbnails } from './ReviewPhotoGallery';
@@ -127,7 +128,7 @@ export default function ClientReviewsPanel({
       else fd.append('maxUserId', clientAuth.userId);
       photos.forEach((p) => fd.append('photos', p.file));
 
-      await axios.post('/api/client/reviews', fd);
+      await axios.post('/api/client/reviews', fd, withClientAuth(clientAuth));
       setBody('');
       photos.forEach((p) => {
         if (p.preview) URL.revokeObjectURL(p.preview);

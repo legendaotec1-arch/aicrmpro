@@ -40,12 +40,13 @@ async function send24HourReminders() {
         `💅 Услуга: ${apt.service_name}\n\n` +
         `❌ Отменить запись: /cancel_${apt.id}`;
 
-      await sendMessengerNotification(apt, message);
-
-      await db.query(`
-        INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)
-        VALUES ($1, $2, 'reminder_24h', NOW(), 'sent')
-      `, [apt.client_id, apt.id]);
+      const sent = await sendMessengerNotification(apt, message);
+      if (sent) {
+        await db.query(`
+          INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)
+          VALUES ($1, $2, 'reminder_24h', NOW(), 'sent')
+        `, [apt.client_id, apt.id]);
+      }
     }
 
     console.log(`Отправлено ${appointments.rows.length} уведомлений за 24 часа`);
@@ -84,12 +85,13 @@ async function send3HourReminders() {
         `💅 Услуга: ${apt.service_name}\n\n` +
         `❌ Отменить: /cancel_${apt.id}`;
 
-      await sendMessengerNotification(apt, message);
-
-      await db.query(`
-        INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)
-        VALUES ($1, $2, 'reminder_3h', NOW(), 'sent')
-      `, [apt.client_id, apt.id]);
+      const sent = await sendMessengerNotification(apt, message);
+      if (sent) {
+        await db.query(`
+          INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)
+          VALUES ($1, $2, 'reminder_3h', NOW(), 'sent')
+        `, [apt.client_id, apt.id]);
+      }
     }
 
     console.log(`Отправлено ${appointments.rows.length} уведомлений за 3 часа`);

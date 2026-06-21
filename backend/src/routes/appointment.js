@@ -10,6 +10,7 @@ const { resolveTelegramChatUrl } = require('../utils/messengerLinks');
 const { validateBookingContact } = require('../utils/clientBookingValidation');
 const { teamAppointmentFilter } = require('../utils/appointmentScope');
 const { assertSlotAvailable, withBookingTransaction } = require('../utils/bookingLock');
+const { getSalonTimezone } = require('../utils/salonTimezone');
 const {
   chargeBookingFee,
   isBillingEnabled,
@@ -155,9 +156,10 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     const appointmentId = uuidv4();
+    const salonTimezone = await getSalonTimezone(db, req.masterId);
     try {
       await withBookingTransaction(db, async (client) => {
-        await assertSlotAvailable(client, salonMasterResolved, appointmentTime, durationMinutes);
+        await assertSlotAvailable(client, salonMasterResolved, appointmentTime, durationMinutes, null, salonTimezone);
         await client.query(
           `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -256,25 +258,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
     }
     const current = existing.rows[0];
 
-    if (appointmentTime && appointmentTime !== current.appointment_time && current.status === 'confirmed') {
-      try {
-        await withBookingTransaction(db, async (client) => {
-          await assertSlotAvailable(
-            client,
-            current.salon_master_id,
-            appointmentTime,
-            duration || current.duration_minutes || 60,
-            id
-          );
-        });
-      } catch (lockErr) {
-        if (lockErr.status === 409) {
-          return res.status(409).json({ error: lockErr.message });
-        }
-        throw lockErr;
-      }
-    }
-
     // Если меняем статус на отменён, получим данные для уведомления
     let clientData = null;
     let masterContacts = null;
@@ -283,13 +266,12 @@ router.put('/:id', authMiddleware, async (req, res) => {
         `SELECT c.max_user_id, c.telegram_user_id, c.messenger, a.service_name, a.appointment_time
          FROM appointments a
          JOIN clients c ON a.client_id = c.id
-         WHERE a.id = $1 AND a.master_id = $2`,
-        [id, req.masterId]
+         WHERE a.id = $1 AND a.master_id = $2${scope.sql}`,
+        [id, req.masterId, ...scope.params]
       );
       if (appointmentData.rows.length > 0) {
         clientData = appointmentData.rows[0];
       }
-      // Получаем контакты мастера для сообщения
       const masterData = await db.query(
         `SELECT social_telegram, social_max, phone FROM masters WHERE id = $1`,
         [req.masterId]
@@ -299,20 +281,60 @@ router.put('/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    const result = await db.query(
-      `UPDATE appointments SET
-        service_name = COALESCE($1, service_name),
-        service_price = COALESCE($2, service_price),
-        appointment_time = COALESCE($3, appointment_time),
-        duration_minutes = COALESCE($4, duration_minutes),
-        status = COALESCE($5, status),
-        client_notes = COALESCE($6, client_notes)
-       WHERE id = $7 AND master_id = $8`,
-      [serviceName, servicePrice, appointmentTime, duration, status, clientNotes, id, req.masterId]
-    );
+    const timeChanged = appointmentTime
+      && new Date(appointmentTime).getTime() !== new Date(current.appointment_time).getTime();
+    const salonTimezone = await getSalonTimezone(db, req.masterId);
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Запись не найдена' });
+    try {
+      await withBookingTransaction(db, async (client) => {
+        if (timeChanged && current.status === 'confirmed') {
+          await assertSlotAvailable(
+            client,
+            current.salon_master_id,
+            appointmentTime,
+            duration || current.duration_minutes || 60,
+            id,
+            salonTimezone
+          );
+        }
+
+        const updateScope = teamAppointmentFilter(req, 'a', 9);
+        const result = await client.query(
+          `UPDATE appointments SET
+            service_name = COALESCE($1, service_name),
+            service_price = COALESCE($2, service_price),
+            appointment_time = COALESCE($3, appointment_time),
+            duration_minutes = COALESCE($4, duration_minutes),
+            status = COALESCE($5, status),
+            client_notes = COALESCE($6, client_notes)
+           WHERE id = $7 AND master_id = $8${updateScope.sql}`,
+          [
+            serviceName,
+            servicePrice,
+            appointmentTime,
+            duration,
+            status,
+            clientNotes,
+            id,
+            req.masterId,
+            ...updateScope.params
+          ]
+        );
+
+        if (result.rowCount === 0) {
+          const err = new Error('Запись не найдена');
+          err.status = 404;
+          throw err;
+        }
+      });
+    } catch (lockErr) {
+      if (lockErr.status === 404) {
+        return res.status(404).json({ error: lockErr.message });
+      }
+      if (lockErr.status === 409) {
+        return res.status(409).json({ error: lockErr.message });
+      }
+      throw lockErr;
     }
 
     if (status === 'no_show') {

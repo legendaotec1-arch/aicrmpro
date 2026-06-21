@@ -1,19 +1,19 @@
 const { v4: uuidv4 } = require('uuid');
+const { todayInTimezone, DEFAULT_SALON_TIMEZONE } = require('./salonTime');
 
-const MSK_OFFSET_MIN = 180;
-
-/** Сегодня по Москве (YYYY-MM-DD) */
+/** Сегодня по Москве (YYYY-MM-DD) — для обратной совместимости */
 function mskTodayDateStr() {
-  const local = new Date(Date.now() + MSK_OFFSET_MIN * 60 * 1000);
-  const y = local.getUTCFullYear();
-  const m = String(local.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(local.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return todayInTimezone('Europe/Moscow');
 }
 
-/** Удаляет исключения с датой раньше сегодня (МСК), чтобы список не засорялся */
-async function cleanupPastScheduleExceptions(db, { salonMasterId = null } = {}) {
-  const today = mskTodayDateStr();
+/** Сегодня в указанном часовом поясе (YYYY-MM-DD) */
+function salonTodayDateStr(timeZone = DEFAULT_SALON_TIMEZONE) {
+  return todayInTimezone(timeZone);
+}
+
+/** Удаляет исключения с датой раньше сегодня, чтобы список не засорялся */
+async function cleanupPastScheduleExceptions(db, { salonMasterId = null, timeZone = DEFAULT_SALON_TIMEZONE } = {}) {
+  const today = salonTodayDateStr(timeZone);
   const params = [today];
   let sql = 'DELETE FROM schedule_exceptions WHERE exception_date < $1::date';
   if (salonMasterId) {
@@ -24,14 +24,14 @@ async function cleanupPastScheduleExceptions(db, { salonMasterId = null } = {}) 
   return result.rowCount || 0;
 }
 
-function assertFutureExceptionDate(exception_date) {
+function assertFutureExceptionDate(exception_date, timeZone = DEFAULT_SALON_TIMEZONE) {
   const key = String(exception_date || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
     const err = new Error('Укажите корректную дату');
     err.status = 400;
     throw err;
   }
-  if (key < mskTodayDateStr()) {
+  if (key < salonTodayDateStr(timeZone)) {
     const err = new Error('Нельзя добавить исключение на прошедшую дату');
     err.status = 400;
     throw err;
@@ -46,9 +46,10 @@ async function upsertScheduleException(db, {
   exception_date,
   is_working,
   start_time = null,
-  end_time = null
+  end_time = null,
+  timeZone = DEFAULT_SALON_TIMEZONE
 }) {
-  const dateKey = assertFutureExceptionDate(exception_date);
+  const dateKey = assertFutureExceptionDate(exception_date, timeZone);
 
   if (is_working) {
     if (!start_time || !end_time) {
@@ -94,6 +95,7 @@ async function upsertScheduleException(db, {
 
 module.exports = {
   mskTodayDateStr,
+  salonTodayDateStr,
   cleanupPastScheduleExceptions,
   upsertScheduleException
 };

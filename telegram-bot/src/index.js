@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 const { Telegraf, Markup } = require('telegraf');
 const { requireInternalSecret, internalAuthHeaders } = require('./internalAuth');
+const { appendDeepLinkAuthParams } = require('./clientDeepLink');
 
 const app = express();
 app.use(cors());
@@ -38,6 +39,7 @@ function buildBookingUrl(masterIdEncoded, userId, extra = {}) {
   if (userId) {
     params.set('ch', 'telegram');
     params.set('uid', String(userId));
+    appendDeepLinkAuthParams(params, { channel: 'telegram', userId: String(userId), masterIdEncoded });
   }
   Object.entries(extra).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') params.set(key, String(value));

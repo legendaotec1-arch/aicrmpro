@@ -1,3 +1,5 @@
+const { salonDateFromAppointmentTime } = require('./salonTime');
+
 function hasOverlap(rows, startMs, endMs) {
   return rows.some((b) => {
     const bookedStart = new Date(b.appointment_time).getTime();
@@ -6,13 +8,14 @@ function hasOverlap(rows, startMs, endMs) {
   });
 }
 
-async function assertSlotAvailable(client, salonMasterId, appointmentTime, durationMinutes, excludeAppointmentId = null) {
+async function assertSlotAvailable(client, salonMasterId, appointmentTime, durationMinutes, excludeAppointmentId = null, timeZone = 'Europe/Moscow') {
   const startMs = new Date(appointmentTime).getTime();
   const endMs = startMs + durationMinutes * 60000;
-  const lockKey = `${salonMasterId}:${Math.floor(startMs / 60000)}`;
+  const dateStr = salonDateFromAppointmentTime(appointmentTime, timeZone);
+  const lockKey = `${salonMasterId}:${dateStr}`;
   await client.query('SELECT pg_advisory_xact_lock(hashtext($1::text))', [lockKey]);
 
-  const params = [salonMasterId, appointmentTime];
+  const params = [salonMasterId, dateStr, timeZone];
   let excludeSql = '';
   if (excludeAppointmentId) {
     params.push(excludeAppointmentId);
@@ -22,7 +25,7 @@ async function assertSlotAvailable(client, salonMasterId, appointmentTime, durat
   const booked = await client.query(
     `SELECT id, appointment_time, duration_minutes FROM appointments
      WHERE salon_master_id = $1 AND status = 'confirmed'
-       AND DATE(appointment_time) = DATE($2::timestamptz)${excludeSql}
+       AND DATE(appointment_time AT TIME ZONE $3) = $2::date${excludeSql}
      FOR UPDATE`,
     params
   );

@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { resolveJwtSecret } = require('./jwtConfig');
 const { normalizeChannel } = require('./clients');
 const { verifyInternalSecret } = require('./internalAuth');
+const { resolveMasterId } = require('./links');
 
 function signClientToken({ channel, userId, masterId }) {
   return jwt.sign(
@@ -35,6 +36,11 @@ function extractRequestMessengerUser(req) {
   return { channel, userId: userId ? String(userId) : null };
 }
 
+function resolveRequestSalonId(req) {
+  const raw = req.params.masterId || req.body?.masterId || req.query?.masterId;
+  return raw ? resolveMasterId(raw) : null;
+}
+
 function requireClientAccess(req, res, next) {
   if (verifyInternalSecret(req)) {
     req.clientAccess = { internal: true };
@@ -55,6 +61,10 @@ function requireClientAccess(req, res, next) {
     if (channel && channel !== decoded.channel) {
       return res.status(403).json({ error: 'Недостаточно прав' });
     }
+    const salonId = resolveRequestSalonId(req);
+    if (salonId && decoded.masterId && decoded.masterId !== salonId) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
     req.clientAccess = decoded;
     next();
   } catch {
@@ -66,5 +76,6 @@ module.exports = {
   signClientToken,
   verifyClientToken,
   requireClientAccess,
-  extractClientToken
+  extractClientToken,
+  resolveRequestSalonId
 };

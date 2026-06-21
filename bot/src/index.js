@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const { requireInternalSecret, internalAuthHeaders } = require('./internalAuth');
+const { appendDeepLinkAuthParams } = require('./clientDeepLink');
 
 const app = express();
 app.use(cors());
@@ -48,6 +49,9 @@ function buildBookingUrl(masterIdEncoded, userId, extra = {}) {
   Object.entries(extra).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
   });
+  if (userId) {
+    appendDeepLinkAuthParams(params, { channel: 'max', userId: String(userId), masterIdEncoded });
+  }
   return `${PUBLIC_URL}/m/${masterIdEncoded}?${params.toString()}`;
 }
 
@@ -562,7 +566,9 @@ async function handleMessageCallback(update) {
 }
 
 function verifyWebhookSecret(req) {
-  if (!WEBHOOK_SECRET) return true;
+  if (!WEBHOOK_SECRET) {
+    return process.env.NODE_ENV !== 'production';
+  }
   return req.get('X-Max-Bot-Api-Secret') === WEBHOOK_SECRET;
 }
 

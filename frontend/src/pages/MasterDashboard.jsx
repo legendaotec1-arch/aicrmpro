@@ -40,6 +40,7 @@ import ManualBookModal from '../components/dashboard/ManualBookModal';
 import AppointmentDetailModal from '../components/dashboard/AppointmentDetailModal';
 import { appointmentClientForAvatar } from '../lib/appointments';
 import { MASTER_SOCIAL_FIELDS } from '../lib/socialLinks';
+import { RUSSIAN_TIMEZONES, DEFAULT_TIMEZONE } from '../lib/timezone';
 
 function buildScheduleDraft(apiSchedule) {
   return Array.from({ length: 7 }, (_, day) => {
@@ -991,6 +992,24 @@ export default function MasterDashboard() {
                       />
                     </div>
                   )}
+                </div>
+
+                <div className="h-px bg-admin-border" />
+
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold text-admin-text">Часовой пояс</p>
+                  <p className="text-xs text-admin-textMuted">
+                    График работы и запись клиентов считаются по этому времени. Клиенты увидят слоты в вашем поясе.
+                  </p>
+                  <select
+                    className="w-full rounded-xl border border-admin-border bg-white px-3 py-2.5 text-sm text-admin-text focus:border-admin-accent focus:outline-none focus:ring-2 focus:ring-admin-accent/20"
+                    value={profileForm.timezone || DEFAULT_TIMEZONE}
+                    onChange={(e) => setProfileForm({ ...profileForm, timezone: e.target.value })}
+                  >
+                    {RUSSIAN_TIMEZONES.map((tz) => (
+                      <option key={tz.id} value={tz.id}>{tz.label}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="h-px bg-admin-border" />

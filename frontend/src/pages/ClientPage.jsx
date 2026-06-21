@@ -36,7 +36,13 @@ import ClientThemeRoot from '../components/client/ClientThemeRoot';
 import { DEFAULT_CLIENT_THEME } from '../config/clientThemes';
 import AddressMap from '../components/maps/AddressMap';
 import PhoneRuInput from '../components/ui/PhoneRuInput';
-import { formatDateTime, formatPrice } from '../lib/format';
+import { formatPrice } from '../lib/format';
+import {
+  formatSalonTime,
+  formatSalonDateTime,
+  clientLocalHint,
+  normalizeTimezone
+} from '../lib/timezone';
 import { formatMasterPublicTitle, formatSalonMasterName } from '../lib/masterDisplay';
 import SalonMasterAvatar from '../components/client/SalonMasterAvatar';
 import { isRuPhoneComplete, normalizeRuPhoneForStorage } from '../lib/phoneRu';
@@ -662,11 +668,14 @@ export default function ClientPage() {
   const [formData, setFormData] = useState({ name: '', phone: '+7' });
   const bookingFormRef = useRef(null);
   const reschedulePrefillRef = useRef(null);
+  const identifySyncKeyRef = useRef('');
+  const slotsRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [booking, setBooking] = useState(false);
   const [clientAuth, setClientAuth] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [authPending, setAuthPending] = useState(false);
   const [rescheduleId, setRescheduleId] = useState(null);
   const [rescheduleLoading, setRescheduleLoading] = useState(false);
   const [appointments, setAppointments] = useState([]);
@@ -674,12 +683,11 @@ export default function ClientPage() {
   const [mediaViewer, setMediaViewer] = useState(null);
   const [serviceImagePreview, setServiceImagePreview] = useState(null);
   const [touchStartX, setTouchStartX] = useState(null);
+  const [bookingSuccessWasReschedule, setBookingSuccessWasReschedule] = useState(false);
 
   const clientThemeId = master?.client_theme || DEFAULT_CLIENT_THEME;
 
   const resolveAuthFromUrl = useCallback(() => {
-    const ch = searchParams.get('ch');
-    const uid = searchParams.get('uid');
     const tab = searchParams.get('tab');
     const reschedule = searchParams.get('reschedule');
 
@@ -690,25 +698,8 @@ export default function ClientPage() {
       setStep('master');
     }
 
-    if (uid && (ch === 'max' || ch === 'telegram')) {
-      const session = {
-        channel: ch,
-        userId: uid,
-        firstName: searchParams.get('fn') || undefined,
-        photoUrl: searchParams.get('photo') || undefined
-      };
-      setClientSession(masterId, session);
-      setClientAuth(session);
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        ['ch', 'uid', 'fn', 'photo'].forEach((key) => next.delete(key));
-        return next;
-      }, { replace: true });
-      return session;
-    }
-
     return getClientSession(masterId);
-  }, [masterId, searchParams, setSearchParams]);
+  }, [masterId, searchParams]);
 
   const loadMasterData = useCallback(async () => {
     try {
@@ -764,9 +755,90 @@ export default function ClientPage() {
 
   useEffect(() => {
     const session = resolveAuthFromUrl();
-    setClientAuth(session || null);
+    setClientAuth(session?.clientToken ? session : null);
+    const hasDeeplinkParams = Boolean(
+      searchParams.get('uid') && searchParams.get('exp') && searchParams.get('sig')
+        && (searchParams.get('ch') === 'max' || searchParams.get('ch') === 'telegram')
+    );
+    const inTelegramWebApp = Boolean((window.Telegram?.WebApp?.initData || '').length);
+    setAuthPending(hasDeeplinkParams || inTelegramWebApp);
     setAuthChecked(true);
-  }, [resolveAuthFromUrl]);
+  }, [resolveAuthFromUrl, searchParams]);
+
+  useEffect(() => {
+    if (!masterId || clientAuth?.clientToken) return;
+
+    const initData = window.Telegram?.WebApp?.initData;
+    if (initData) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const res = await axios.post('/api/client/auth/telegram-webapp', { masterId, initData });
+          if (cancelled) return;
+          const session = {
+            channel: 'telegram',
+            userId: res.data.userId,
+            firstName: res.data.firstName || undefined,
+            photoUrl: res.data.photoUrl || undefined,
+            clientToken: res.data.clientToken
+          };
+          setClientSession(masterId, session);
+          setClientAuth(session);
+          window.Telegram?.WebApp?.ready?.();
+        } catch (err) {
+          console.error('telegram webapp auth failed', err);
+        } finally {
+          if (!cancelled) setAuthPending(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
+    const ch = searchParams.get('ch');
+    const uid = searchParams.get('uid');
+    const exp = searchParams.get('exp');
+    const sig = searchParams.get('sig');
+    if (!uid || !exp || !sig || (ch !== 'max' && ch !== 'telegram')) {
+      setAuthPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.post('/api/client/auth/deeplink', {
+          masterId,
+          channel: ch,
+          userId: uid,
+          exp,
+          sig,
+          firstName: searchParams.get('fn') || undefined,
+          photoUrl: searchParams.get('photo') || undefined
+        });
+        if (cancelled) return;
+        const session = {
+          channel: res.data.channel || ch,
+          userId: res.data.userId || uid,
+          firstName: res.data.firstName || searchParams.get('fn') || undefined,
+          photoUrl: res.data.photoUrl || searchParams.get('photo') || undefined,
+          clientToken: res.data.clientToken
+        };
+        setClientSession(masterId, session);
+        setClientAuth(session);
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          ['ch', 'uid', 'fn', 'photo', 'exp', 'sig'].forEach((key) => next.delete(key));
+          return next;
+        }, { replace: true });
+      } catch (err) {
+        console.error('deeplink auth failed', err);
+      } finally {
+        if (!cancelled) setAuthPending(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [masterId, searchParams, setSearchParams, clientAuth?.clientToken]);
 
   useEffect(() => {
     loadMasterData();
@@ -778,7 +850,16 @@ export default function ClientPage() {
 
   useEffect(() => {
     if (selectedDate && master && clientAuth && selectedSalonMaster) loadSlots();
-  }, [selectedDate, master, clientAuth, selectedSalonMaster, selectedService, rescheduleId]);
+  }, [
+    selectedDate,
+    master,
+    clientAuth?.userId,
+    clientAuth?.channel,
+    selectedSalonMaster?.id,
+    selectedService?.id,
+    selectedService?.duration_minutes,
+    rescheduleId
+  ]);
 
   useEffect(() => {
     if (clientAuth?.firstName && isValidClientName(clientAuth.firstName) && !formData.name) {
@@ -787,7 +868,17 @@ export default function ClientPage() {
   }, [clientAuth?.firstName, formData.name]);
 
   useEffect(() => {
-    if (!clientAuth || !masterId) return;
+    if (!clientAuth?.clientToken || !masterId) return;
+    const syncKey = [
+      masterId,
+      clientAuth.channel,
+      clientAuth.userId,
+      formData.name,
+      formData.phone
+    ].join('|');
+    if (identifySyncKeyRef.current === syncKey) return;
+    identifySyncKeyRef.current = syncKey;
+
     axios.post('/api/client/identify', {
       masterId,
       channel: clientAuth.channel,
@@ -799,16 +890,14 @@ export default function ClientPage() {
           : undefined,
       phone: isRuPhoneComplete(formData.phone) ? normalizeRuPhoneForStorage(formData.phone) : undefined,
       photoUrl: clientAuth.photoUrl || undefined
-    })
+    }, withClientAuth(clientAuth))
       .then((res) => {
-        if (res.data?.clientToken) {
-          const updated = { ...clientAuth, clientToken: res.data.clientToken };
-          setClientSession(masterId, updated);
-          setClientAuth(updated);
-        }
+        if (!res.data?.clientToken) return;
+        setClientSession(masterId, { ...clientAuth, clientToken: res.data.clientToken });
+        setClientAuth((prev) => (prev ? { ...prev, clientToken: res.data.clientToken } : prev));
       })
       .catch(() => {});
-  }, [clientAuth, masterId, formData.name, formData.phone]);
+  }, [masterId, clientAuth?.userId, clientAuth?.channel, formData.name, formData.phone]);
 
   useEffect(() => {
     reschedulePrefillRef.current = null;
@@ -877,6 +966,7 @@ export default function ClientPage() {
   }, [masterId]);
 
   const loadSlots = async () => {
+    const requestId = ++slotsRequestIdRef.current;
     try {
       const year = selectedDate.getFullYear();
       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
@@ -890,9 +980,12 @@ export default function ClientPage() {
       });
       if (rescheduleId) params.set('excludeAppointmentId', rescheduleId);
       const res = await axios.get(`/api/client/${masterId}/slots?${params.toString()}`);
-      setAvailableSlots(res.data);
-      setSelectedSlot(null);
+      if (requestId !== slotsRequestIdRef.current) return;
+      const slots = res.data || [];
+      setAvailableSlots(slots);
+      setSelectedSlot((prev) => (prev && slots.includes(prev) ? prev : null));
     } catch (err) {
+      if (requestId !== slotsRequestIdRef.current) return;
       console.error(err);
     }
   };
@@ -910,6 +1003,12 @@ export default function ClientPage() {
   const videoItems = useMemo(() => mediaItems.filter((item) => item.media_type !== 'image'), [mediaItems]);
   const currentMedia = mediaViewer ? mediaViewer.items[mediaViewer.index] : null;
   const title = formatMasterPublicTitle(master);
+  const salonTimezone = useMemo(
+    () => normalizeTimezone(master?.timezone || bookingConfig?.timezone),
+    [master?.timezone, bookingConfig?.timezone]
+  );
+  const salonTimezoneLabel = master?.timezoneLabel || bookingConfig?.timezoneLabel || salonTimezone;
+  const selectedSlotLocalHint = selectedSlot ? clientLocalHint(selectedSlot, salonTimezone) : null;
 
   const openMedia = (items, index) => setMediaViewer({ items, index });
   const openServiceImage = (item) => {
@@ -991,6 +1090,7 @@ export default function ClientPage() {
       }
 
       setStep('done');
+      setBookingSuccessWasReschedule(wasRescheduling);
       if (wasRescheduling) setRescheduleId(null);
       await loadAppointments();
     } catch (err) {
@@ -1101,7 +1201,7 @@ export default function ClientPage() {
     );
   }
 
-  if (!authChecked) {
+  if (!authChecked || authPending) {
     return (
       <div
         style={{
@@ -1374,7 +1474,7 @@ export default function ClientPage() {
                       >
                         <CalendarDays size={16} color={PREMIUM.accent} />
                         <span style={{ fontSize: '14px', fontWeight: '600', color: PREMIUM.textPrimary }}>
-                          {formatDateTime(apt.appointment_time)}
+                          {formatSalonDateTime(apt.appointment_time, salonTimezone)}
                         </span>
                       </div>
 
@@ -1470,13 +1570,13 @@ export default function ClientPage() {
                     <Check size={40} color="#4CAF50" />
                   </div>
                   <h2 style={{ fontSize: '24px', fontWeight: '800', color: PREMIUM.textPrimary, marginBottom: '8px' }}>
-                    {rescheduleId ? 'Запись перенесена!' : 'Вы записаны!'}
+                    {bookingSuccessWasReschedule ? 'Запись перенесена!' : 'Вы записаны!'}
                   </h2>
                   <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '8px' }}>
                     {selectedService?.name}
                   </p>
                   <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '24px' }}>
-                    {selectedSlot && new Date(selectedSlot).toLocaleString('ru-RU')}
+                    {selectedSlot && formatSalonDateTime(selectedSlot, salonTimezone)}
                   </p>
                   <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginBottom: '32px' }}>
                     Напоминание в <MessengerLabel channel={clientAuth.channel} size="xs" />
@@ -1727,8 +1827,11 @@ export default function ClientPage() {
                             </div>
                           </div>
                           <div>
-                            <p style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: PREMIUM.textMuted, marginBottom: '12px' }}>
+                            <p style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: PREMIUM.textMuted, marginBottom: '8px' }}>
                               Время
+                            </p>
+                            <p style={{ fontSize: '12px', color: PREMIUM.textSecondary, marginBottom: '12px' }}>
+                              По времени мастера · {salonTimezoneLabel}
                             </p>
                             {availableSlots.length === 0 ? (
                               <div
@@ -1756,7 +1859,7 @@ export default function ClientPage() {
                                 }}
                               >
                                 {availableSlots.map((slot) => {
-                                  const label = new Date(slot).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                                  const label = formatSalonTime(slot, salonTimezone);
                                   return (
                                     <PremiumTimeSlot
                                       key={slot}
@@ -1832,8 +1935,13 @@ export default function ClientPage() {
                               </p>
                             )}
                             <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>
-                              {new Date(selectedSlot).toLocaleString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long', hour: '2-digit', minute: '2-digit' })}
+                              {formatSalonDateTime(selectedSlot, salonTimezone)}
                             </p>
+                            {selectedSlotLocalHint && (
+                              <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginTop: '4px' }}>
+                                {selectedSlotLocalHint}
+                              </p>
+                            )}
                           </div>
                         </div>
 

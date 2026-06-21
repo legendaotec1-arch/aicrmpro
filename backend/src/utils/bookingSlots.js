@@ -1,26 +1,31 @@
 const { getSalonMasterById } = require('./salonMasters');
+const { getSalonTimezone } = require('./salonTimezone');
+const { dayOfWeekFromDateStr, formatSalonIso, parseSalonIso } = require('./salonTime');
 
-function generateTimeSlots(startTime, endTime, stepMinutes = 60, baseDateStr) {
+function generateTimeSlots(startTime, endTime, stepMinutes, dateStr, timeZone) {
   const slots = [];
   const [startHour, startMin] = String(startTime).split(':').map(Number);
   const [endHour, endMin] = String(endTime).split(':').map(Number);
   const step = Math.max(15, parseInt(stepMinutes, 10) || 60);
 
-  const [year, month, day] = String(baseDateStr).split('-').map(Number);
-  const current = new Date(year, month - 1, day, startHour, startMin, 0, 0);
-  const end = new Date(year, month - 1, day, endHour, endMin, 0, 0);
+  let hour = startHour;
+  let minute = startMin;
+  const endTotal = endHour * 60 + endMin;
 
-  while (current < end) {
-    slots.push(new Date(current));
-    current.setMinutes(current.getMinutes() + step);
+  while (hour * 60 + minute < endTotal) {
+    slots.push(formatSalonIso(dateStr, hour, minute, timeZone));
+    minute += step;
+    while (minute >= 60) {
+      minute -= 60;
+      hour += 1;
+    }
   }
 
-  return slots;
+  return { slots, endHour, endMin };
 }
 
-function formatSlotIso(slotDate) {
-  const offset = slotDate.getTimezoneOffset() * 60000;
-  return new Date(slotDate.getTime() - offset).toISOString().slice(0, 19) + '+05:00';
+function formatSlotIso(slotIso) {
+  return slotIso;
 }
 
 async function getAvailableSlots(db, {
@@ -41,6 +46,8 @@ async function getAvailableSlots(db, {
     throw err;
   }
 
+  const timeZone = await getSalonTimezone(db, salonId);
+
   const teamMaster = await getSalonMasterById(salonMasterId, salonId);
   if (!teamMaster || !teamMaster.is_active) {
     const err = new Error('Мастер не найден');
@@ -51,7 +58,7 @@ async function getAvailableSlots(db, {
   const serviceDuration = Math.max(15, parseInt(durationMinutes, 10) || 60);
   const stepMinutes = teamMaster.slot_step_minutes || 60;
   const dateStr = String(date).split('T')[0];
-  const dayOfWeek = new Date(`${dateStr}T12:00:00`).getDay();
+  const dayOfWeek = dayOfWeekFromDateStr(dateStr);
 
   const exception = await db.query(
     `SELECT * FROM schedule_exceptions
@@ -60,7 +67,6 @@ async function getAvailableSlots(db, {
   );
   const ex = exception.rows[0];
 
-  // Выходной по исключению — слотов нет
   if (ex && !ex.is_working) {
     return [];
   }
@@ -76,34 +82,36 @@ async function getAvailableSlots(db, {
   let endTime;
 
   if (ex && ex.is_working) {
-    // Короткий / особый рабочий день — только выбранные часы
     startTime = ex.start_time;
     endTime = ex.end_time;
     if (!startTime || !endTime) {
       return [];
     }
   } else if (!sched || sched.is_day_off) {
-    // Обычный выходной по недельному расписанию
     return [];
   } else {
     startTime = sched.start_time;
     endTime = sched.end_time;
   }
 
-  const slots = generateTimeSlots(startTime, endTime, stepMinutes, dateStr);
+  const { slots, endHour, endMin } = generateTimeSlots(startTime, endTime, stepMinutes, dateStr, timeZone);
+  const endOfDayMs = parseSalonIso(formatSalonIso(dateStr, endHour, endMin, timeZone)).getTime();
 
   const booked = await db.query(
     `SELECT appointment_time, duration_minutes FROM appointments
-     WHERE salon_master_id = $1 AND DATE(appointment_time) = $2 AND status = 'confirmed'
-       AND ($3::uuid IS NULL OR id != $3::uuid)`,
-    [salonMasterId, dateStr, excludeAppointmentId]
+     WHERE salon_master_id = $1
+       AND DATE(appointment_time AT TIME ZONE $3) = $2::date
+       AND status = 'confirmed'
+       AND ($4::uuid IS NULL OR id != $4::uuid)`,
+    [salonMasterId, dateStr, timeZone, excludeAppointmentId]
   );
 
   const now = Date.now();
-  const freeSlots = slots.filter((slot) => {
-    const slotStart = slot.getTime();
+  const freeSlots = slots.filter((slotIso) => {
+    const slotStart = parseSalonIso(slotIso).getTime();
     const slotEnd = slotStart + serviceDuration * 60000;
     if (slotStart < now) return false;
+    if (slotEnd > endOfDayMs) return false;
     return !booked.rows.some((b) => {
       const bookedStart = new Date(b.appointment_time).getTime();
       const bookedEnd = bookedStart + (b.duration_minutes || 60) * 60000;
@@ -111,7 +119,7 @@ async function getAvailableSlots(db, {
     });
   });
 
-  return freeSlots.map(formatSlotIso);
+  return freeSlots;
 }
 
 module.exports = { generateTimeSlots, formatSlotIso, getAvailableSlots };

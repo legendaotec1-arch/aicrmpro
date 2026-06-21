@@ -12,35 +12,7 @@ async function sendMessengerNotification(client, message, options = {}) {
   const sendMax = channel === 'all' || channel === 'max';
 
   if (sendTelegram && client.telegram_user_id) {
-    await axios.post(
-      `${telegramBotUrl}/notify`,
-      {
-        telegramUserId: client.telegram_user_id,
-        message,
-        replyUrl: options.replyUrl,
-        replyText: options.replyText
-      },
-      { headers }
-    );
-    sent += 1;
-  }
-
-  if (sendMax && client.max_user_id) {
-    await axios.post(
-      `${maxBotUrl}/notify`,
-      {
-        maxUserId: client.max_user_id,
-        message,
-        replyUrl: options.replyUrl,
-        replyText: options.replyText
-      },
-      { headers }
-    );
-    sent += 1;
-  }
-
-  if (sent === 0 && channel === 'all') {
-    if (client.messenger === 'telegram' && client.telegram_user_id) {
+    try {
       await axios.post(
         `${telegramBotUrl}/notify`,
         {
@@ -51,7 +23,47 @@ async function sendMessengerNotification(client, message, options = {}) {
         },
         { headers }
       );
-      return true;
+      sent += 1;
+    } catch (err) {
+      console.error('[notify] Telegram failed:', err.response?.data || err.message);
+    }
+  }
+
+  if (sendMax && client.max_user_id) {
+    try {
+      await axios.post(
+        `${maxBotUrl}/notify`,
+        {
+          maxUserId: client.max_user_id,
+          message,
+          replyUrl: options.replyUrl,
+          replyText: options.replyText
+        },
+        { headers }
+      );
+      sent += 1;
+    } catch (err) {
+      console.error('[notify] MAX failed:', err.response?.data || err.message);
+    }
+  }
+
+  if (sent === 0 && channel === 'all') {
+    if (client.messenger === 'telegram' && client.telegram_user_id) {
+      try {
+        await axios.post(
+          `${telegramBotUrl}/notify`,
+          {
+            telegramUserId: client.telegram_user_id,
+            message,
+            replyUrl: options.replyUrl,
+            replyText: options.replyText
+          },
+          { headers }
+        );
+        return true;
+      } catch (err) {
+        console.error('[notify] Telegram fallback failed:', err.response?.data || err.message);
+      }
     }
   }
 

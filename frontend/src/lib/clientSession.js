@@ -6,7 +6,7 @@ export function getClientSession(masterIdEncoded) {
     const raw = sessionStorage.getItem(STORAGE_PREFIX + masterIdEncoded);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data?.channel || !data?.userId) return null;
+    if (!data?.channel || !data?.userId || !data?.clientToken) return null;
     return data;
   } catch {
     return null;

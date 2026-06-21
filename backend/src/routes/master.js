@@ -32,7 +32,9 @@ const { fetchClientsExportRows, buildClientsCsv } = require('../utils/clientsExp
 const { formatClientDisplayName } = require('../utils/clientDisplay');
 const { formatMasterPublicTitle } = require('../utils/masterDisplay');
 const { buildSocialLinksFromRow, pickSocialPayload } = require('../utils/socialLinks');
-const { upsertScheduleException, cleanupPastScheduleExceptions, mskTodayDateStr } = require('../utils/scheduleExceptions');
+const { upsertScheduleException, cleanupPastScheduleExceptions, salonTodayDateStr } = require('../utils/scheduleExceptions');
+const { listRussianTimezones, getTimezoneLabel, normalizeTimezone } = require('../utils/salonTime');
+const { getSalonTimezone } = require('../utils/salonTimezone');
 const { sendMessengerNotification } = require('../utils/notify');
 const { daysAgo, buildDailySeries } = require('../utils/analytics');
 const {
@@ -72,15 +74,13 @@ const {
   UNLIMITED_PRICE,
   getBillingConfig
 } = require('../utils/billing');
+const { buildSignedClientWebUrl } = require('../utils/clientDeepLink');
 const { createPayment, isYookassaConfigured } = require('../utils/yookassa');
 
 const router = express.Router();
 
 function buildClientWebUrl(masterId, channel, userId, tab = 'booking') {
-  const base = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
-  const params = new URLSearchParams({ ch: channel, uid: String(userId) });
-  if (tab) params.set('tab', tab);
-  return `${base}/m/${encodeMasterId(masterId)}?${params.toString()}`;
+  return buildSignedClientWebUrl(masterId, channel, userId, tab ? { tab } : {});
 }
 
 // Middleware для проверки авторизации (владелец или мастер команды)
@@ -366,7 +366,7 @@ router.get('/:masterId', async (req, res) => {
     const master = await queryWithColumnFallback(
       db,
       `SELECT id, name, last_name, salon_name, logo_url, description, phone, address,
-              latitude, longitude, yandex_maps_link, client_theme,
+              latitude, longitude, yandex_maps_link, client_theme, timezone,
               social_telegram, social_instagram, social_vk, social_website, social_max,
               video_reel_url
        FROM masters WHERE id = $1`,
@@ -419,6 +419,7 @@ router.get('/:masterId', async (req, res) => {
     );
 
     const masterRow = sanitizeMasterMediaRow(master.rows[0]);
+    const salonTimezone = normalizeTimezone(masterRow.timezone);
     const socialLinks = buildSocialLinksFromRow(masterRow);
     let billingState = null;
     if (isBillingEnabled()) {
@@ -426,7 +427,11 @@ router.get('/:masterId', async (req, res) => {
         const billingRow = await getMasterBillingRow(masterId);
         if (billingRow) billingState = formatBillingState(billingRow);
       } catch (billingErr) {
-        console.error('Billing lookup skipped for public master page:', billingErr.message);
+        console.error('Billing lookup failed for public master page:', billingErr.message);
+        billingState = {
+          online_booking_allowed: false,
+          online_booking_block_reason: 'Биллинг временно недоступен'
+        };
       }
     }
     const {
@@ -440,6 +445,8 @@ router.get('/:masterId', async (req, res) => {
     res.json({
       master: {
         ...masterPublic,
+        timezone: salonTimezone,
+        timezoneLabel: getTimezoneLabel(salonTimezone),
         socialLinks,
         client_theme: normalizeClientTheme(masterRow.client_theme),
         display_title: formatMasterPublicTitle(masterRow)
@@ -454,6 +461,8 @@ router.get('/:masterId', async (req, res) => {
       },
       reviews: recentReviews.rows,
       booking: {
+        timezone: salonTimezone,
+        timezoneLabel: getTimezoneLabel(salonTimezone),
         telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME || null,
         telegramBotDeepLink: process.env.TELEGRAM_BOT_USERNAME
           ? `https://t.me/${process.env.TELEGRAM_BOT_USERNAME}?start=ref_${encodeMasterId(masterId)}`
@@ -479,7 +488,7 @@ router.get('/me/profile', authMiddleware, requireOwner, async (req, res) => {
     const result = await queryWithColumnFallback(
       db,
       `SELECT id, email, name, last_name, salon_name, logo_url, description, phone,
-              address, latitude, longitude, yandex_maps_link, client_theme, created_at,
+              address, latitude, longitude, yandex_maps_link, client_theme, timezone, created_at,
               social_telegram, social_instagram, social_vk, social_website, social_max,
               video_reel_url
        FROM masters WHERE id = $1`,
@@ -494,8 +503,11 @@ router.get('/me/profile', authMiddleware, requireOwner, async (req, res) => {
     }
 
     const row = sanitizeMasterMediaRow(result.rows[0]);
+    const salonTimezone = normalizeTimezone(row.timezone);
     res.json({
       ...row,
+      timezone: salonTimezone,
+      timezoneLabel: getTimezoneLabel(salonTimezone),
       client_theme: normalizeClientTheme(row.client_theme)
     });
   } catch (error) {
@@ -505,6 +517,10 @@ router.get('/me/profile', authMiddleware, requireOwner, async (req, res) => {
 
 router.get('/me/client-themes', authMiddleware, requireOwner, (_req, res) => {
   res.json({ themes: listClientThemesCatalog(), defaultTheme: DEFAULT_CLIENT_THEME });
+});
+
+router.get('/me/timezones', authMiddleware, requireOwner, (_req, res) => {
+  res.json({ timezones: listRussianTimezones(), defaultTimezone: normalizeTimezone() });
 });
 
 router.put('/me/client-theme', authMiddleware, requireOwner, async (req, res) => {
@@ -552,7 +568,8 @@ router.post('/me/geocode', authMiddleware, async (req, res) => {
 // Обновить профиль мастера
 router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
   try {
-    let { name, last_name, salon_name, description, phone, address, latitude, longitude, yandex_maps_link } = req.body;
+    let { name, last_name, salon_name, description, phone, address, latitude, longitude, yandex_maps_link, timezone } = req.body;
+    const normalizedTimezone = timezone != null ? normalizeTimezone(timezone) : null;
 
     const current = await db.query(
       'SELECT address, latitude, longitude FROM masters WHERE id = $1',
@@ -592,6 +609,7 @@ router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
           latitude = COALESCE($7, latitude),
           longitude = COALESCE($8, longitude),
           yandex_maps_link = COALESCE($9, yandex_maps_link),
+          timezone = COALESCE($16, timezone),
           social_telegram = $11,
           social_instagram = $12,
           social_vk = $13,
@@ -614,7 +632,8 @@ router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
           social.social_instagram ?? null,
           social.social_vk ?? null,
           social.social_website ?? null,
-          social.social_max ?? null
+          social.social_max ?? null,
+          normalizedTimezone
         ]
       );
     } else {
@@ -629,18 +648,19 @@ router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
           latitude = COALESCE($7, latitude),
           longitude = COALESCE($8, longitude),
           yandex_maps_link = COALESCE($9, yandex_maps_link),
+          timezone = COALESCE($11, timezone),
           updated_at = NOW()
          WHERE id = $10`,
-        [name, last_name, salon_name, description, phone, address, latitude, longitude, yandex_maps_link, req.masterId]
+        [name, last_name, salon_name, description, phone, address, latitude, longitude, yandex_maps_link, req.masterId, normalizedTimezone]
       );
     }
 
     const updated = await db.query(
-      `SELECT address, latitude, longitude, yandex_maps_link FROM masters WHERE id = $1`,
+      `SELECT address, latitude, longitude, yandex_maps_link, timezone FROM masters WHERE id = $1`,
       [req.masterId]
     );
 
-    res.json({ success: true, ...updated.rows[0] });
+    res.json({ success: true, ...updated.rows[0], timezoneLabel: getTimezoneLabel(updated.rows[0]?.timezone) });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при обновлении профиля' });
   }
@@ -789,8 +809,9 @@ router.get('/me/slots', authMiddleware, async (req, res) => {
 router.get('/me/exceptions', authMiddleware, async (req, res) => {
   try {
     const salonMasterId = await resolveTeamMasterId(req.masterId, req.query.salonMasterId, req.salonMasterId);
-    await cleanupPastScheduleExceptions(db, { salonMasterId });
-    const today = mskTodayDateStr();
+    const salonTimezone = await getSalonTimezone(db, req.masterId);
+    await cleanupPastScheduleExceptions(db, { salonMasterId, timeZone: salonTimezone });
+    const today = salonTodayDateStr(salonTimezone);
     const result = await db.query(
       'SELECT * FROM schedule_exceptions WHERE salon_master_id = $1 AND exception_date >= $2::date ORDER BY exception_date',
       [salonMasterId, today]
@@ -807,7 +828,8 @@ router.post('/me/exceptions', authMiddleware, async (req, res) => {
   try {
     const { exception_date, is_working, start_time, end_time, salonMasterId: bodySalonMasterId } = req.body;
     const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
-    await cleanupPastScheduleExceptions(db, { salonMasterId });
+    const salonTimezone = await getSalonTimezone(db, req.masterId);
+    await cleanupPastScheduleExceptions(db, { salonMasterId, timeZone: salonTimezone });
 
     await upsertScheduleException(db, {
       masterId: req.masterId,
@@ -815,7 +837,8 @@ router.post('/me/exceptions', authMiddleware, async (req, res) => {
       exception_date,
       is_working,
       start_time,
-      end_time
+      end_time,
+      timeZone: salonTimezone
     });
 
     res.json({ success: true });
@@ -837,9 +860,10 @@ router.post('/me/exceptions/bulk', authMiddleware, async (req, res) => {
     }
 
     const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
-    await cleanupPastScheduleExceptions(db, { salonMasterId });
+    const salonTimezone = await getSalonTimezone(db, req.masterId);
+    await cleanupPastScheduleExceptions(db, { salonMasterId, timeZone: salonTimezone });
     const normalized = [...new Set(dates.map((d) => String(d).slice(0, 10)))].filter((d) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= mskTodayDateStr()
+      /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= salonTodayDateStr(salonTimezone)
     );
 
     if (action === 'remove') {
@@ -858,7 +882,8 @@ router.post('/me/exceptions/bulk', authMiddleware, async (req, res) => {
         exception_date,
         is_working: false,
         start_time: null,
-        end_time: null
+        end_time: null,
+        timeZone: salonTimezone
       });
     }
 
@@ -1369,9 +1394,12 @@ router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
     let clients;
     if (client_ids && client_ids.length > 0) {
       clients = await db.query(
-        `SELECT id, messenger, max_user_id, telegram_user_id FROM clients
-         WHERE id = ANY($1) AND (max_user_id IS NOT NULL OR telegram_user_id IS NOT NULL)`,
-        [client_ids]
+        `SELECT DISTINCT c.id, c.messenger, c.max_user_id, c.telegram_user_id
+         FROM clients c
+         JOIN appointments a ON a.client_id = c.id
+         WHERE c.id = ANY($1) AND a.master_id = $2
+         AND (c.max_user_id IS NOT NULL OR c.telegram_user_id IS NOT NULL)`,
+        [client_ids, req.masterId]
       );
     } else {
       clients = await db.query(

@@ -17,7 +17,7 @@ const { validateBookingContact } = require('../utils/clientBookingValidation');
 const { resolveMasterId, isResolvedMasterId } = require('../utils/links');
 const { getSalonMasterById } = require('../utils/salonMasters');
 const { getAvailableSlots } = require('../utils/bookingSlots');
-const { verifyTelegramLoginWidget } = require('../utils/telegramAuth');
+const { verifyTelegramLoginWidget, verifyTelegramWebAppInitData } = require('../utils/telegramAuth');
 const { getOrCreateConversation, listMessages, addMessage } = require('../utils/chat');
 const { notifyOwnerNewChatMessage, notifyOwnerNewReview } = require('../utils/salonNotify');
 const { scheduleClientPhotoSync, applyClientPhoto } = require('../utils/clientPhoto');
@@ -29,7 +29,9 @@ const {
 } = require('../utils/billing');
 const { requireInternalSecret } = require('../utils/internalAuth');
 const { signClientToken, requireClientAccess } = require('../utils/clientAuth');
+const { verifyDeepLinkAuth } = require('../utils/clientDeepLink');
 const { assertSlotAvailable, withBookingTransaction } = require('../utils/bookingLock');
+const { getSalonTimezone } = require('../utils/salonTimezone');
 
 const router = express.Router();
 
@@ -86,8 +88,8 @@ router.post('/sync-avatar', requireInternalSecret, async (req, res) => {
   }
 });
 
-// Клиент авторизовался у конкретного мастера/салона
-router.post('/identify', async (req, res) => {
+// Клиент авторизовался у конкретного мастера/салона (только с валидным client token)
+router.post('/identify', requireClientAccess, async (req, res) => {
   try {
     const { masterId, channel, userId, maxUserId, telegramUserId, name, phone, photoUrl } = req.body;
     if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
@@ -127,6 +129,124 @@ router.post('/identify', async (req, res) => {
   } catch (error) {
     console.error('Client identify error:', error);
     res.status(500).json({ error: 'Ошибка авторизации клиента' });
+  }
+});
+
+// Вход по подписанной ссылке из бота (ch, uid, exp, sig)
+router.post('/auth/deeplink', async (req, res) => {
+  try {
+    const { masterId, channel, userId, maxUserId, telegramUserId, exp, sig, firstName, photoUrl } = req.body;
+    if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
+
+    const salonId = resolveMasterId(masterId);
+    if (!isResolvedMasterId(salonId)) {
+      return res.status(404).json({ error: 'Мастер не найден' });
+    }
+
+    const messenger = normalizeChannel(channel);
+    const messengerUserId = userId || (messenger === 'telegram' ? telegramUserId : maxUserId);
+    if (!messengerUserId) return res.status(400).json({ error: 'Не авторизован' });
+
+    const masterIdEncoded = masterId;
+    if (!verifyDeepLinkAuth({
+      channel: messenger,
+      userId: String(messengerUserId),
+      masterIdEncoded,
+      exp: Number(exp),
+      sig
+    })) {
+      return res.status(401).json({ error: 'Недействительная ссылка. Откройте запись через бота.' });
+    }
+
+    const master = await db.query('SELECT id FROM masters WHERE id = $1', [salonId]);
+    if (master.rows.length === 0) return res.status(404).json({ error: 'Мастер не найден' });
+
+    let clientId = await findOrCreateClient({
+      channel: messenger,
+      maxUserId: messenger === 'max' ? messengerUserId : null,
+      telegramUserId: messenger === 'telegram' ? messengerUserId : null,
+      name: firstName,
+      salonId
+    });
+    await ensureSalonClientProfile(salonId, clientId);
+
+    const clientToken = signClientToken({
+      channel: messenger,
+      userId: messengerUserId,
+      masterId: salonId
+    });
+
+    res.json({
+      success: true,
+      clientId,
+      clientToken,
+      channel: messenger,
+      userId: String(messengerUserId),
+      firstName: firstName || null,
+      photoUrl: photoUrl || null
+    });
+  } catch (error) {
+    console.error('Client deeplink auth error:', error);
+    res.status(500).json({ error: 'Ошибка авторизации' });
+  }
+});
+
+// Вход из Telegram Mini App (кнопка WebApp в боте)
+router.post('/auth/telegram-webapp', async (req, res) => {
+  try {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      return res.status(503).json({ error: 'Telegram-бот не настроен на сервере' });
+    }
+
+    const { masterId, initData } = req.body;
+    if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
+    if (!initData) return res.status(400).json({ error: 'Нет данных Telegram' });
+
+    const salonId = resolveMasterId(masterId);
+    if (!isResolvedMasterId(salonId)) {
+      return res.status(404).json({ error: 'Мастер не найден' });
+    }
+
+    const tgUser = verifyTelegramWebAppInitData(initData, botToken);
+    if (!tgUser) {
+      return res.status(401).json({ error: 'Не удалось подтвердить вход через Telegram' });
+    }
+
+    const displayName = [tgUser.firstName, tgUser.lastName].filter(Boolean).join(' ').trim() || null;
+    let clientId = await findOrCreateClient({
+      channel: 'telegram',
+      telegramUserId: tgUser.telegramUserId,
+      name: displayName || tgUser.username || 'Клиент',
+      telegramUsername: tgUser.username,
+      salonId
+    });
+    await ensureSalonClientProfile(salonId, clientId);
+
+    if (tgUser.photoUrl) {
+      scheduleClientPhotoSync(clientId, {
+        channel: 'telegram',
+        messengerUserId: tgUser.telegramUserId,
+        photoUrl: tgUser.photoUrl
+      });
+    }
+
+    res.json({
+      success: true,
+      clientId,
+      channel: 'telegram',
+      userId: tgUser.telegramUserId,
+      firstName: tgUser.firstName,
+      photoUrl: tgUser.photoUrl,
+      clientToken: signClientToken({
+        channel: 'telegram',
+        userId: tgUser.telegramUserId,
+        masterId: salonId
+      })
+    });
+  } catch (error) {
+    console.error('Telegram WebApp auth error:', error);
+    res.status(500).json({ error: 'Ошибка авторизации' });
   }
 });
 
@@ -212,7 +332,7 @@ router.post('/auth/telegram', async (req, res) => {
 });
 
 // Оставить отзыв (после визита), до 3 фото
-router.post('/reviews', reviewPhotoUpload.array('photos', 3), async (req, res) => {
+router.post('/reviews', requireClientAccess, reviewPhotoUpload.array('photos', 3), async (req, res) => {
   try {
     const {
       masterId,
@@ -458,9 +578,10 @@ router.post('/book', requireClientAccess, async (req, res) => {
     });
 
     const appointmentId = uuidv4();
+    const salonTimezone = await getSalonTimezone(db, resolvedSalonId);
     try {
       await withBookingTransaction(db, async (client) => {
-        await assertSlotAvailable(client, salonMasterId, appointmentTime, durationMinutes);
+        await assertSlotAvailable(client, salonMasterId, appointmentTime, durationMinutes, null, salonTimezone);
         await client.query(
           `INSERT INTO appointments (id, master_id, salon_master_id, client_id, service_name, service_price, appointment_time, duration_minutes, client_notes, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'confirmed')`,
@@ -587,6 +708,7 @@ router.put('/appointment/:appointmentId/reschedule', requireClientAccess, async 
     }
 
     const durationMinutes = duration || 60;
+    const salonTimezone = await getSalonTimezone(db, current.rows[0].master_id);
 
     try {
       await withBookingTransaction(db, async (client) => {
@@ -595,7 +717,8 @@ router.put('/appointment/:appointmentId/reschedule', requireClientAccess, async 
           resolvedSalonMasterId,
           appointmentTime,
           durationMinutes,
-          appointmentId
+          appointmentId,
+          salonTimezone
         );
         await client.query(
           `UPDATE appointments
