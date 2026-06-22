@@ -1,12 +1,16 @@
 {
+  "id": "https://woner.ru/",
   "name": "Woner.ru",
-  "short_name": "Woner",
-  "description": "Сервис онлайн записи клиентов",
-  "start_url": "/",
+  "short_name": "Woner.ru",
+  "description": "Онлайн-запись, клиенты, расписание и рассылки для мастеров",
+  "start_url": "/dashboard?utm_source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#ffffff",
   "theme_color": "#6A5ACD",
   "lang": "ru",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/images/icon-192.png",

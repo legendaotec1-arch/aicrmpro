@@ -30,6 +30,7 @@ import ThemesSection from '../components/dashboard/ThemesSection';
 import MasterSocialLinksCard from '../components/dashboard/MasterSocialLinksCard';
 import ScheduleSection from '../components/dashboard/ScheduleSection';
 import BillingSection from '../components/dashboard/BillingSection';
+import InstallPwaBanner from '../components/pwa/InstallPwaBanner';
 import VideoReelCard from '../components/dashboard/VideoReelCard';
 import ServicePriceModal from '../components/dashboard/ServicePriceModal';
 import OverviewStatsCard from '../components/dashboard/OverviewStatsCard';
@@ -641,6 +642,7 @@ export default function MasterDashboard() {
         navigate('/login');
       }}
     >
+      <InstallPwaBanner />
       {activeSection === 'overview' && (
         <div className="space-y-6">
           {clientBookingUrl && (
