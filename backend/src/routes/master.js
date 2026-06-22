@@ -72,7 +72,9 @@ const {
   setAutoRenew,
   MIN_TOPUP,
   UNLIMITED_PRICE,
-  getBillingConfig
+  getBillingConfig,
+  buildBillingReturnUrl,
+  resolveBillingPaymentReturn
 } = require('../utils/billing');
 const { buildSignedClientWebUrl } = require('../utils/clientDeepLink');
 const { createPayment, isYookassaConfigured } = require('../utils/yookassa');
@@ -1919,20 +1921,33 @@ router.post('/me/billing/topup', authMiddleware, requireOwner, async (req, res) 
       return res.status(400).json({ error: `Минимальная сумма пополнения — ${MIN_TOPUP} ₽` });
     }
 
+    const masterRow = await getMasterBillingRow(req.masterId);
+    if (!masterRow) return res.status(404).json({ error: 'Мастер не найден' });
+
+    const localPaymentId = uuidv4();
+    await db.query(
+      `INSERT INTO billing_payments (id, master_id, yookassa_payment_id, amount, purpose, status)
+       VALUES ($1, $2, NULL, $3, 'topup', 'pending')`,
+      [localPaymentId, req.masterId, amount]
+    );
+
+    const paymentDescription = `Пополнение баланса Woner.ru (${amount} ₽)`;
     const payment = await createPayment({
       amount,
-      description: `Пополнение баланса Woner.ru (${amount} ₽)`,
-      metadata: { master_id: req.masterId, purpose: 'topup' }
+      description: paymentDescription,
+      metadata: { master_id: req.masterId, purpose: 'topup' },
+      returnUrl: buildBillingReturnUrl(localPaymentId),
+      customerEmail: masterRow.email
     });
 
     await db.query(
-      `INSERT INTO billing_payments (id, master_id, yookassa_payment_id, amount, purpose, status)
-       VALUES ($1, $2, $3, $4, 'topup', 'pending')`,
-      [uuidv4(), req.masterId, payment.id, amount]
+      `UPDATE billing_payments SET yookassa_payment_id = $1 WHERE id = $2`,
+      [payment.id, localPaymentId]
     );
 
     res.json({
       paymentId: payment.id,
+      localPaymentId,
       confirmationUrl: payment.confirmation?.confirmation_url
     });
   } catch (error) {
@@ -1950,25 +1965,51 @@ router.post('/me/billing/unlimited', authMiddleware, requireOwner, async (req, r
       return res.status(503).json({ error: 'Платёжная система не настроена' });
     }
 
+    const masterRow = await getMasterBillingRow(req.masterId);
+    if (!masterRow) return res.status(404).json({ error: 'Мастер не найден' });
+
+    const localPaymentId = uuidv4();
+    await db.query(
+      `INSERT INTO billing_payments (id, master_id, yookassa_payment_id, amount, purpose, status)
+       VALUES ($1, $2, NULL, $3, 'unlimited', 'pending')`,
+      [localPaymentId, req.masterId, UNLIMITED_PRICE]
+    );
+
+    const paymentDescription = `Тариф «Безлимит» Woner.ru (${UNLIMITED_PRICE} ₽ / 30 дней)`;
     const payment = await createPayment({
       amount: UNLIMITED_PRICE,
-      description: `Тариф «Безлимит» Woner.ru (${UNLIMITED_PRICE} ₽ / 30 дней)`,
-      metadata: { master_id: req.masterId, purpose: 'unlimited' }
+      description: paymentDescription,
+      metadata: { master_id: req.masterId, purpose: 'unlimited' },
+      returnUrl: buildBillingReturnUrl(localPaymentId),
+      customerEmail: masterRow.email
     });
 
     await db.query(
-      `INSERT INTO billing_payments (id, master_id, yookassa_payment_id, amount, purpose, status)
-       VALUES ($1, $2, $3, $4, 'unlimited', 'pending')`,
-      [uuidv4(), req.masterId, payment.id, UNLIMITED_PRICE]
+      `UPDATE billing_payments SET yookassa_payment_id = $1 WHERE id = $2`,
+      [payment.id, localPaymentId]
     );
 
     res.json({
       paymentId: payment.id,
+      localPaymentId,
       confirmationUrl: payment.confirmation?.confirmation_url
     });
   } catch (error) {
     console.error('Unlimited purchase error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Не удалось создать платёж' });
+  }
+});
+
+router.get('/me/billing/payment/:paymentRef', authMiddleware, requireOwner, async (req, res) => {
+  try {
+    const result = await resolveBillingPaymentReturn(req.masterId, req.params.paymentRef);
+    if (!result) {
+      return res.status(404).json({ error: 'Платёж не найден' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Billing payment status error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Не удалось проверить статус оплаты' });
   }
 });
 

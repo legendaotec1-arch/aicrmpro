@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { sendBalanceAlertEmail } = require('./email');
+const { fetchPayment, buildPaymentReturnMessage, getReturnUrl } = require('./yookassa');
 
 const REGISTRATION_BONUS = Number(process.env.BILLING_REGISTRATION_BONUS) || 60;
 const PER_BOOKING_FEE = Number(process.env.BILLING_PER_BOOKING_FEE) || 20;
@@ -406,6 +407,57 @@ async function grantRegistrationBonus(masterId) {
   }
 }
 
+function buildBillingReturnUrl(localPaymentId) {
+  const base = getReturnUrl();
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}billing_payment=${encodeURIComponent(localPaymentId)}`;
+}
+
+async function getBillingPaymentForMaster(masterId, paymentRef) {
+  const result = await db.query(
+    `SELECT * FROM billing_payments
+     WHERE master_id = $1 AND (id::text = $2 OR yookassa_payment_id = $2)
+     LIMIT 1`,
+    [masterId, paymentRef]
+  );
+  return result.rows[0] || null;
+}
+
+async function resolveBillingPaymentReturn(masterId, paymentRef) {
+  const record = await getBillingPaymentForMaster(masterId, paymentRef);
+  if (!record) return null;
+
+  if (record.status === 'succeeded') {
+    return buildPaymentReturnMessage(record, 'succeeded');
+  }
+
+  if (!record.yookassa_payment_id) {
+    return buildPaymentReturnMessage(record, 'failed');
+  }
+
+  const payment = await fetchPayment(record.yookassa_payment_id);
+
+  if (payment.status === 'succeeded') {
+    if (record.purpose === 'topup') {
+      await applyTopup(masterId, Number(record.amount), record.yookassa_payment_id);
+    } else if (record.purpose === 'unlimited') {
+      await applyUnlimitedPurchase(masterId, record.yookassa_payment_id);
+    }
+    return buildPaymentReturnMessage(record, 'succeeded');
+  }
+
+  if (payment.status === 'pending' || payment.status === 'waiting_for_capture') {
+    return buildPaymentReturnMessage(record, 'pending');
+  }
+
+  if (payment.status === 'canceled') {
+    await db.query(`UPDATE billing_payments SET status = 'canceled' WHERE id = $1`, [record.id]);
+    return buildPaymentReturnMessage(record, 'failed', payment);
+  }
+
+  return buildPaymentReturnMessage(record, 'failed', payment);
+}
+
 module.exports = {
   REGISTRATION_BONUS,
   PER_BOOKING_FEE,
@@ -427,5 +479,7 @@ module.exports = {
   applyUnlimitedPurchase,
   setAutoRenew,
   grantRegistrationBonus,
-  checkAndSendBalanceAlerts
+  checkAndSendBalanceAlerts,
+  buildBillingReturnUrl,
+  resolveBillingPaymentReturn
 };
