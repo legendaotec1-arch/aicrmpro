@@ -36,7 +36,7 @@ const { upsertScheduleException, cleanupPastScheduleExceptions, salonTodayDateSt
 const { listRussianTimezones, getTimezoneLabel, normalizeTimezone } = require('../utils/salonTime');
 const { getSalonTimezone } = require('../utils/salonTimezone');
 const { sendMessengerNotification } = require('../utils/notify');
-const { daysAgo, buildDailySeries } = require('../utils/analytics');
+const { buildSalonAnalytics, buildAnalyticsExportXlsx } = require('../utils/salonAnalytics');
 const {
   getOrCreateConversation,
   listMessages,
@@ -1781,86 +1781,36 @@ router.get('/me/revenue-export', authMiddleware, async (req, res) => {
 // Аналитика салона
 router.get('/me/analytics', authMiddleware, requireOwner, async (req, res) => {
   try {
-    const days = Math.min(90, Math.max(7, parseInt(req.query.days, 10) || 30));
-    const since = daysAgo(days);
-
-    const appointments = await db.query(
-      `SELECT a.appointment_time, a.service_name, a.service_price, a.status, a.client_id,
-              sm.name AS salon_master_name, sm.id AS salon_master_id
-       FROM appointments a
-       LEFT JOIN salon_masters sm ON a.salon_master_id = sm.id
-       WHERE a.master_id = $1 AND a.appointment_time >= $2`,
-      [req.masterId, since]
-    );
-
-    const rows = appointments.rows;
-    const active = rows.filter((r) =>
-      ['confirmed', 'completed', 'cancelled', 'no_show'].includes(r.status)
-    );
-    const completed = rows.filter((r) => r.status === 'completed');
-    const revenue = completed.reduce((s, r) => s + Number(r.service_price || 0), 0);
-
-    const clientIds = new Set(active.map((r) => r.client_id).filter(Boolean));
-    const newClients = await db.query(
-      `SELECT COUNT(DISTINCT c.id)::int AS cnt
-       FROM clients c
-       JOIN appointments a ON a.client_id = c.id AND a.master_id = $1
-       WHERE c.created_at >= $2`,
-      [req.masterId, since]
-    );
-
-    const serviceMap = {};
-    active.forEach((r) => {
-      serviceMap[r.service_name] = serviceMap[r.service_name] || { count: 0, revenue: 0 };
-      serviceMap[r.service_name].count += 1;
-    });
-    completed.forEach((r) => {
-      if (!serviceMap[r.service_name]) {
-        serviceMap[r.service_name] = { count: 0, revenue: 0 };
-      }
-      serviceMap[r.service_name].revenue += Number(r.service_price || 0);
-    });
-    const topServices = Object.entries(serviceMap)
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 8);
-
-    const masterMap = {};
-    active.forEach((r) => {
-      const key = r.salon_master_name || 'Без мастера';
-      masterMap[key] = masterMap[key] || { appointments: 0, revenue: 0 };
-      masterMap[key].appointments += 1;
-    });
-    completed.forEach((r) => {
-      const key = r.salon_master_name || 'Без мастера';
-      if (!masterMap[key]) {
-        masterMap[key] = { appointments: 0, revenue: 0 };
-      }
-      masterMap[key].revenue += Number(r.service_price || 0);
-    });
-    const byMaster = Object.entries(masterMap)
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.revenue - a.revenue);
-
-    const cancelled = rows.filter((r) => r.status === 'cancelled' || r.status === 'no_show').length;
-
-    res.json({
-      period_days: days,
-      summary: {
-        appointments: active.length,
-        cancelled,
-        revenue,
-        unique_clients: clientIds.size,
-        new_clients: newClients.rows[0]?.cnt || 0,
-        cancellation_rate: rows.length ? Math.round((cancelled / rows.length) * 100) : 0
-      },
-      daily: buildDailySeries(rows, days),
-      top_services: topServices,
-      by_master: byMaster
-    });
+    const month = req.query.month || null;
+    const data = await buildSalonAnalytics(req.masterId, { month });
+    res.json(data);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Ошибка при получении аналитики' });
+  }
+});
+
+router.get('/me/analytics-export', authMiddleware, requireOwner, async (req, res) => {
+  try {
+    const month = req.query.month || null;
+    const salonMasterId = req.query.master_id || null;
+    const xlsx = await buildAnalyticsExportXlsx({
+      salonId: req.masterId,
+      month,
+      salonMasterId
+    });
+    const periodSlug = month || 'tekushiy-mesyac';
+    const slug = salonMasterId ? `master-${String(salonMasterId).slice(0, 8)}` : 'salon';
+    const filename = `analitika-${slug}-${periodSlug}.xlsx`;
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(Buffer.from(xlsx));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при выгрузке аналитики' });
   }
 });
 

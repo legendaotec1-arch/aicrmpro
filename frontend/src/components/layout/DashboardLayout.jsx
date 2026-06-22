@@ -213,7 +213,7 @@ export default function DashboardLayout({
         <div className="shrink-0 p-3 border-t border-admin-border">
           <Button
             variant="ghost"
-            className="w-full justify-start gap-2 py-2.5 text-admin-textSecondary hover:text-admin-text hover:bg-admin-hover"
+            className="w-full justify-start gap-2 py-2.5 text-rose-600 hover:bg-rose-50 hover:text-rose-700 focus-visible:ring-rose-300"
             onClick={onLogout}
           >
             <LogOut className="h-5 w-5" strokeWidth={1.75} />
@@ -268,7 +268,7 @@ export default function DashboardLayout({
             <div className="p-4 border-t border-admin-border shrink-0">
               <Button
                 variant="ghost"
-                className="w-full justify-start gap-2 py-3 text-base text-admin-text hover:bg-admin-hover"
+                className="w-full justify-start gap-2 py-3 text-base text-rose-600 hover:bg-rose-50 hover:text-rose-700 focus-visible:ring-rose-300"
                 onClick={() => {
                   setMobileMenuOpen(false);
                   onLogout();

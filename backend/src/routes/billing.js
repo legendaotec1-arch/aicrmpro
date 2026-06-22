@@ -30,7 +30,13 @@ router.post('/yookassa/webhook', async (req, res) => {
       return res.json({ ok: true });
     }
 
-    const verified = await fetchPayment(payment.id);
+    const verified = await fetchPayment(payment.id).catch((err) => {
+      console.warn('YooKassa webhook: fetch payment failed', payment.id, err.response?.data || err.message);
+      return null;
+    });
+    if (!verified) {
+      return res.json({ ok: true });
+    }
     if (verified.status !== 'succeeded') {
       console.warn('YooKassa webhook: payment not succeeded in API', payment.id, verified.status);
       return res.json({ ok: true });
@@ -55,7 +61,7 @@ router.post('/yookassa/webhook', async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     console.error('YooKassa webhook error:', error);
-    res.status(500).json({ error: 'Webhook error' });
+    res.json({ ok: true });
   }
 });
 

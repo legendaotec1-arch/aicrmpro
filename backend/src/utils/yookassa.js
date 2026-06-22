@@ -26,7 +26,6 @@ function formatAmount(value) {
 function buildReceipt({ amount, description, customerEmail }) {
   const email = String(customerEmail || process.env.YOOKASSA_RECEIPT_EMAIL || '').trim();
   const receipt = {
-    tax_system_code: Number(process.env.YOOKASSA_TAX_SYSTEM_CODE) || 2,
     items: [
       {
         description: String(description).slice(0, 128),
@@ -39,6 +38,11 @@ function buildReceipt({ amount, description, customerEmail }) {
       }
     ]
   };
+
+  const taxCode = process.env.YOOKASSA_TAX_SYSTEM_CODE;
+  if (taxCode !== undefined && taxCode !== '') {
+    receipt.tax_system_code = Number(taxCode);
+  }
 
   if (email) {
     receipt.customer = { email };
@@ -66,12 +70,14 @@ function formatPaymentFailureReason(reason) {
     issuer_unavailable: 'Банк-эмитент недоступен, попробуйте позже',
     payment_method_limit_exceeded: 'Превышен лимит по способу оплаты',
     payment_method_restricted: 'Способ оплаты недоступен',
-    internal_timeout: 'Превышено время ожидания, попробуйте ещё раз',
+    internal_timeout: 'Технический сбой на стороне платёжной системы. Попробуйте ещё раз или оплатите картой',
+    payment_timeout: 'Время на оплату истекло',
+    processing_error: 'Технический сбой при обработке платежа. Попробуйте ещё раз или выберите оплату картой',
     unsupported_mobile_operator: 'Оператор не поддерживается'
   };
   if (reason && map[reason]) return map[reason];
-  if (reason) return `Оплата не прошла (${reason})`;
-  return 'Оплата не прошла. Попробуйте ещё раз или выберите другой способ.';
+  if (reason) return `Оплата не прошла (${reason}). Попробуйте ещё раз или оплатите картой`;
+  return 'Оплата не прошла. Попробуйте ещё раз или выберите другой способ (например, банковскую карту).';
 }
 
 function buildPaymentReturnMessage(record, status, payment = null) {

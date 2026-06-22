@@ -19,10 +19,10 @@ import Input from '../ui/Input';
 import EmptyState from '../ui/EmptyState';
 import { PageLoader } from '../ui/Spinner';
 
-const TOPUP_PRESETS = [300, 500, 1000, 2000, 5000];
+const TOPUP_PRESETS = [20, 100, 300, 500, 1000];
 const PAYMENT_STORAGE_KEY = 'woner_billing_payment_ref';
 const PAYMENT_POLL_MS = 2000;
-const PAYMENT_POLL_MAX = 8;
+const PAYMENT_POLL_MAX = 15;
 
 function PaymentNotice({ notice, onDismiss }) {
   if (!notice) return null;
@@ -172,7 +172,7 @@ export default function BillingSection({ api, toast }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
-  const [topupAmount, setTopupAmount] = useState('500');
+  const [topupAmount, setTopupAmount] = useState('100');
   const [data, setData] = useState(null);
   const [paymentNotice, setPaymentNotice] = useState(null);
   const paymentCheckRef = useRef(false);
@@ -249,7 +249,7 @@ export default function BillingSection({ api, toast }) {
   }, [api, searchParams, setSearchParams, toast]);
 
   const fee = data?.per_booking_fee ?? data?.perBookingFee ?? 20;
-  const minTopup = data?.min_topup ?? data?.minTopup ?? 100;
+  const minTopup = data?.min_topup ?? data?.minTopup ?? 20;
   const unlimitedPrice = data?.unlimited_price ?? data?.unlimitedPrice ?? 900;
   const unlimitedDays = data?.unlimited_days ?? data?.unlimitedDays ?? 30;
   const criticalBalance = data?.criticalBalance ?? 30;
@@ -391,7 +391,7 @@ export default function BillingSection({ api, toast }) {
                     label={`от ${minTopup} ₽`}
                     type="number"
                     min={minTopup}
-                    step="100"
+                    step="10"
                     value={topupAmount}
                     onChange={(e) => setTopupAmount(e.target.value)}
                   />

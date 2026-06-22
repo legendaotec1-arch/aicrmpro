@@ -470,5 +470,7 @@ module.exports = {
   buildRevenueCsv,
   buildTeamRevenueCsv,
   buildOwnerRevenueXlsx,
+  rowShares,
+  mskDayBounds,
   mskMonthBounds
 };

@@ -54,4 +54,48 @@ function buildDailySeries(rows, days = 30) {
   return Object.values(map);
 }
 
-module.exports = { daysAgo, buildDailySeries };
+function buildDailySeriesForRange(rows, startDate, endDate) {
+  const map = {};
+  const cur = new Date(startDate);
+  cur.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+
+  while (cur <= end) {
+    const key = toDateKey(cur);
+    map[key] = {
+      date: key,
+      appointments: 0,
+      active: 0,
+      confirmed: 0,
+      completed: 0,
+      negative: 0,
+      revenue: 0
+    };
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  rows.forEach((r) => {
+    const key = toDateKey(r.appointment_time);
+    if (!map[key]) return;
+    if (COUNTABLE_STATUSES.has(r.status)) {
+      map[key].appointments += 1;
+      if (r.status === 'confirmed') {
+        map[key].confirmed += 1;
+        map[key].active += 1;
+      }
+      if (r.status === 'completed') {
+        map[key].completed += 1;
+        map[key].active += 1;
+      }
+      if (NEGATIVE_STATUSES.has(r.status)) map[key].negative += 1;
+    }
+    if (r.status === 'completed') {
+      map[key].revenue += Number(r.service_price || 0);
+    }
+  });
+
+  return Object.values(map);
+}
+
+module.exports = { daysAgo, buildDailySeries, buildDailySeriesForRange };
