@@ -3,7 +3,7 @@
 set -e
 
 EMAIL="${1:-}"
-DOMAIN="${2:-masterclient45.ru}"
+DOMAIN="${2:-woner.ru}"
 if [ -z "$EMAIL" ]; then
   echo "Использование: bash setup-nginx-on-vps.sh ваш@email.ru [domain]"
   exit 1

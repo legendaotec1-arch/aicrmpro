@@ -140,9 +140,13 @@ export default function SiteFooter({ compact = false }) {
             compact ? '' : 'mt-8 border-t border-slate-800 pt-8'
           }`}
         >
-          <p>
-            © {year} <BrandName className="text-slate-400" />
-          </p>
+          <div className="space-y-1">
+            <p>
+              © {year} <BrandName className="text-slate-400" />
+            </p>
+            <p className="text-slate-500">{SITE_LEGAL.footerRequisites}</p>
+            <p className="text-slate-500">Адрес: {SITE_LEGAL.legalAddress}</p>
+          </div>
           {!compact && (
             <div className="flex flex-wrap gap-x-4 gap-y-2">
               {LEGAL_LINKS.map(({ to, label }) => (

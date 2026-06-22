@@ -180,7 +180,7 @@ docker compose -f docker-compose.prod.yml restart bot
 
 1. Создайте бота у [@BotFather](https://t.me/BotFather), скопируйте токен в `TELEGRAM_BOT_TOKEN` (нужен и боту, и **backend** для входа клиентов на сайте).
 2. `TELEGRAM_BOT_USERNAME` — имя без `@`.
-3. В BotFather: **/setdomain** — укажите домен сайта (например `masterclient45.ru`), иначе виджет «Войти через Telegram» на странице записи не заработает.
+3. В BotFather: **/setdomain** — укажите домен сайта (`woner.ru`), иначе виджет «Войти через Telegram» на странице записи не заработает.
 3. Бот работает в режиме **long polling** (отдельный webhook для Telegram не обязателен на старте).
 
 Перезапуск:

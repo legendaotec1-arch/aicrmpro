@@ -56,7 +56,7 @@ curl -sf http://127.0.0.1:3000/api/health && echo "" || echo "Backend not ready 
 # nginx + SSL для домена (если DNS уже на этом VPS)
 if [ -f deploy/setup-nginx-on-vps.sh ]; then
   EMAIL=""
-  DOMAIN="masterclient45.ru"
+  DOMAIN="woner.ru"
   if [ -f .env ]; then
     EMAIL=$(grep -E '^LETSENCRYPT_EMAIL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
     DOMAIN=$(grep -E '^DOMAIN=' .env | cut -d= -f2- | tr -d '"' | tr -d "'" || echo "$DOMAIN")
@@ -71,6 +71,6 @@ echo ""
 echo "=============================================="
 echo " Done."
 echo " 1) nano $APP_DIR/.env  — passwords, bots, LETSENCRYPT_EMAIL"
-echo " 2) DNS: ${DOMAIN:-masterclient45.ru} -> $(curl -s ifconfig.me 2>/dev/null || echo '83.222.18.141')"
-echo " 3) https://${DOMAIN:-masterclient45.ru}/api/health"
+echo " 2) DNS: ${DOMAIN:-woner.ru} -> $(curl -s ifconfig.me 2>/dev/null || echo '83.222.18.141')"
+echo " 3) https://${DOMAIN:-woner.ru}/api/health"
 echo "=============================================="

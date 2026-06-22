@@ -44,4 +44,4 @@ curl -sf http://127.0.0.1:3000/api/health && echo ''
 Write-Host '==> Deploy on server...' -ForegroundColor Yellow
 & $Plink -ssh $Server -pw $RootPassword -batch -hostkey $HostKey $remoteScript
 
-Write-Host '==> Done: https://masterclient45.ru' -ForegroundColor Green
+Write-Host '==> Done: https://woner.ru' -ForegroundColor Green

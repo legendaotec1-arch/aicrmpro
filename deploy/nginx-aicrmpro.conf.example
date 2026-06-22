@@ -1,9 +1,9 @@
 # Пример для nginx на сервере (SSL уже настроен в другом include)
-# Файл: /etc/nginx/sites-available/masterclient45.ru
+# Файл: /etc/nginx/sites-available/woner.ru
 
 server {
     listen 443 ssl http2;
-    server_name masterclient45.ru www.masterclient45.ru;
+    server_name woner.ru www.woner.ru;
 
     # Ваши пути к сертификату (панель / certbot / Beget)
     ssl_certificate     /path/to/fullchain.pem;
@@ -48,6 +48,6 @@ server {
 
 server {
     listen 80;
-    server_name masterclient45.ru www.masterclient45.ru;
-    return 301 https://masterclient45.ru$request_uri;
+    server_name woner.ru www.woner.ru;
+    return 301 https://woner.ru$request_uri;
 }

@@ -63,9 +63,9 @@ bash $RemoteDir/deploy/install-server.sh
 ssh $Server $remoteScript
 
 Write-Host "`n==> Checking site..." -ForegroundColor Yellow
-ssh $Server "curl -sf http://127.0.0.1:3000/api/health; echo ''; curl -skI https://masterclient45.ru/api/health 2>/dev/null | head -3 || true"
+ssh $Server "curl -sf http://127.0.0.1:3000/api/health; echo ''; curl -skI https://woner.ru/api/health 2>/dev/null | head -3 || true"
 
 Write-Host "`n==> SUCCESS" -ForegroundColor Green
-Write-Host "Open: https://masterclient45.ru"
+Write-Host "Open: https://woner.ru"
 Write-Host "If /m/ links 404: bash $RemoteDir/deploy/setup-nginx-on-vps.sh your@email.ru"
 Write-Host "Edit env: ssh $Server `"nano $RemoteDir/.env`""

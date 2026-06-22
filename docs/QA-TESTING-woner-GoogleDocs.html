@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Задание на тестирование Woner.ru — для Google Docs</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; color: #000; max-width: 800px; margin: 24px auto; }
+    h1 { font-size: 18pt; border-bottom: 2px solid #6A5ACD; padding-bottom: 8px; }
+    h2 { font-size: 14pt; color: #6A5ACD; margin-top: 24px; }
+    h3 { font-size: 12pt; margin-top: 16px; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; }
+    th, td { border: 1px solid #999; padding: 6px 8px; vertical-align: top; }
+    th { background: #f0eef8; font-weight: bold; text-align: left; }
+    .meta td { border: none; padding: 4px 8px 4px 0; }
+    .note { background: #fff8e6; border: 1px solid #e6d9a8; padding: 12px; margin: 16px 0; }
+    .legend span { display: inline-block; margin-right: 16px; }
+    .page-break { page-break-before: always; }
+    .report-box { border: 2px solid #333; padding: 16px; margin-top: 24px; font-family: 'Courier New', monospace; font-size: 10pt; white-space: pre-wrap; background: #fafafa; }
+  </style>
+</head>
+<body>
+
+<h1>Задание на тестирование Woner.ru</h1>
+
+<table class="meta">
+  <tr><td><strong>Для кого:</strong></td><td>Тестировщик фронтенда (начальный уровень)</td></tr>
+  <tr><td><strong>Сайт:</strong></td><td>https://woner.ru</td></tr>
+  <tr><td><strong>Тестировщик:</strong></td><td>_______________________</td></tr>
+  <tr><td><strong>Дата:</strong></td><td>_______________________</td></tr>
+  <tr><td><strong>Устройства:</strong></td><td>_______________________</td></tr>
+  <tr><td><strong>Браузеры:</strong></td><td>_______________________</td></tr>
+</table>
+
+<div class="note">
+  <strong>Цель:</strong> проверить все страницы, все кнопки и сценарии в браузере и в ботах (Telegram, MAX). По каждому пункту поставить статус и комментарий. В конце заполнить бланк отчёта.
+</div>
+
+<h2>Как заполнять статусы</h2>
+<p class="legend">
+  <span><strong>OK</strong> — работает</span>
+  <span><strong>БАГ</strong> — не работает / работает неправильно</span>
+  <span><strong>Н/П</strong> — не проверялось (написать почему)</span>
+  <span><strong>ВОПРОС</strong> — непонятно, уточнить у руководителя</span>
+</p>
+
+<h3>Что попросить у руководителя перед стартом</h3>
+<ul>
+  <li>Логин и пароль тестового мастера (кабинет)</li>
+  <li>Ссылку на страницу записи мастера (https://woner.ru/m/...)</li>
+  <li>Ссылку на бота в Telegram и в MAX</li>
+  <li>Телефон/аккаунт для записи как клиент</li>
+</ul>
+
+<h3>Где тестировать</h3>
+<ul>
+  <li><strong>Компьютер:</strong> Chrome (обязательно)</li>
+  <li><strong>Телефон:</strong> Chrome или Safari (обязательно)</li>
+  <li>По желанию: Firefox</li>
+</ul>
+
+<h3>Как описывать баг</h3>
+<ol>
+  <li>Шаги: что нажимали (1 → 2 → 3)</li>
+  <li>Ожидание: что должно было произойти</li>
+  <li>Факт: что произошло на самом деле</li>
+  <li>Скриншот или короткое видео</li>
+  <li>Устройство и браузер</li>
+</ol>
+
+<h2>1. Общие проверки сайта</h2>
+<table>
+  <tr><th>№</th><th>Проверка</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>1.1</td><td>Открывается https://woner.ru</td><td></td><td></td></tr>
+  <tr><td>1.2</td><td>https://masterclient45.ru перенаправляет на woner.ru</td><td></td><td></td></tr>
+  <tr><td>1.3</td><td>Открывается https://www.woner.ru</td><td></td><td></td></tr>
+  <tr><td>1.4</td><td>Нет белого экрана и явных ошибок</td><td></td><td></td></tr>
+  <tr><td>1.5</td><td>На телефоне всё читается, кнопки нажимаются</td><td></td><td></td></tr>
+</table>
+
+<h2>2. Главная страница (лендинг) — https://woner.ru/</h2>
+
+<h3>2.1 Шапка сайта</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>2.1.1</td><td>Логотип / название</td><td>Нажать — главная</td><td></td><td></td></tr>
+  <tr><td>2.1.2</td><td>Пункты меню</td><td>Каждый пункт — прокрутка или переход</td><td></td><td></td></tr>
+  <tr><td>2.1.3</td><td>«Войти»</td><td>Страница входа</td><td></td><td></td></tr>
+  <tr><td>2.1.4</td><td>«Регистрация» / «Попробовать»</td><td>Страница регистрации</td><td></td><td></td></tr>
+</table>
+
+<h3>2.2 Основной блок</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>2.2.1</td><td>Главная кнопка (CTA)</td><td>Нажать</td><td></td><td></td></tr>
+  <tr><td>2.2.2</td><td>Другие кнопки и ссылки в герое</td><td>Нажать каждую</td><td></td><td></td></tr>
+</table>
+
+<h3>2.3 Блоки ниже по странице</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>2.3.1</td><td>Блок «Возможности»</td><td>Прокрутить, всё читается</td><td></td><td></td></tr>
+  <tr><td>2.3.2</td><td>Блок «Тарифы»</td><td>Кнопки в тарифах</td><td></td><td></td></tr>
+  <tr><td>2.3.3</td><td>Блок «Как это работает»</td><td>Просмотр</td><td></td><td></td></tr>
+  <tr><td>2.3.4</td><td>Карточки мастеров (если есть)</td><td>Нажать</td><td></td><td></td></tr>
+</table>
+
+<h3>2.4 Подвал (footer)</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>2.4.1</td><td>Оферта</td><td>/legal/offer</td><td></td><td></td></tr>
+  <tr><td>2.4.2</td><td>Политика конфиденциальности</td><td>/legal/privacy</td><td></td><td></td></tr>
+  <tr><td>2.4.3</td><td>Оплата</td><td>/legal/payment</td><td></td><td></td></tr>
+  <tr><td>2.4.4</td><td>Соцсети / поддержка</td><td>Каждая ссылка</td><td></td><td></td></tr>
+</table>
+
+<h2>3. Юридические страницы</h2>
+<table>
+  <tr><th>№</th><th>Страница</th><th>URL</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>3.1</td><td>Оферта</td><td>/legal/offer</td><td></td><td></td></tr>
+  <tr><td>3.2</td><td>Конфиденциальность</td><td>/legal/privacy</td><td></td><td></td></tr>
+  <tr><td>3.3</td><td>Оплата</td><td>/legal/payment</td><td></td><td></td></tr>
+</table>
+
+<h2>4. Регистрация мастера — /register</h2>
+<table>
+  <tr><th>№</th><th>Проверка</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>4.1</td><td>Страница открывается</td><td></td><td></td></tr>
+  <tr><td>4.2</td><td>Ввод во все поля</td><td></td><td></td></tr>
+  <tr><td>4.3</td><td>Пустые поля — сообщение об ошибке</td><td></td><td></td></tr>
+  <tr><td>4.4</td><td>Неверный email — ошибка</td><td></td><td></td></tr>
+  <tr><td>4.5</td><td>Успешная регистрация → кабинет</td><td></td><td></td></tr>
+  <tr><td>4.6</td><td>Ссылка «Войти»</td><td></td><td></td></tr>
+</table>
+
+<h2>5. Вход мастера — /login</h2>
+<table>
+  <tr><th>№</th><th>Проверка</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>5.1</td><td>Страница открывается</td><td></td><td></td></tr>
+  <tr><td>5.2</td><td>Неверный пароль — ошибка</td><td></td><td></td></tr>
+  <tr><td>5.3</td><td>Верный вход → /dashboard</td><td></td><td></td></tr>
+  <tr><td>5.4</td><td>Ссылка «Регистрация»</td><td></td><td></td></tr>
+  <tr><td>5.5</td><td>После F5 остаётесь в кабинете</td><td></td><td></td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<h2>6. Кабинет мастера — /dashboard</h2>
+<p>Войти под тестовым аккаунтом. Проверить <strong>каждый пункт меню</strong>.</p>
+
+<h3>6.1 Главная (Обзор)</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.1.1</td><td>Раздел открывается</td><td></td><td></td></tr>
+  <tr><td>6.1.2</td><td>Статистика отображается</td><td></td><td></td></tr>
+  <tr><td>6.1.3</td><td>Ссылка / QR на запись</td><td></td><td></td></tr>
+  <tr><td>6.1.4</td><td>Быстрые действия</td><td></td><td></td></tr>
+</table>
+
+<h3>6.2 Записи</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.2.1</td><td>Список записей</td><td></td><td></td></tr>
+  <tr><td>6.2.2</td><td>Фильтр по дате</td><td></td><td></td></tr>
+  <tr><td>6.2.3</td><td>Клик по записи — карточка</td><td></td><td></td></tr>
+  <tr><td>6.2.4</td><td>Отмена / перенос / написать клиенту</td><td></td><td></td></tr>
+  <tr><td>6.2.5</td><td>«Добавить запись вручную»</td><td></td><td></td></tr>
+  <tr><td>6.2.6</td><td>Модалка: все поля и «Сохранить»</td><td></td><td></td></tr>
+  <tr><td>6.2.7</td><td>Закрыть модалку</td><td></td><td></td></tr>
+</table>
+
+<h3>6.3 Клиенты</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.3.1</td><td>Список клиентов</td><td></td><td></td></tr>
+  <tr><td>6.3.2</td><td>Поиск</td><td></td><td></td></tr>
+  <tr><td>6.3.3</td><td>Карточка клиента</td><td></td><td></td></tr>
+  <tr><td>6.3.4</td><td>Написать сообщение</td><td></td><td></td></tr>
+  <tr><td>6.3.5</td><td>Удалить клиента</td><td></td><td></td></tr>
+  <tr><td>6.3.6</td><td>Чёрный список</td><td></td><td></td></tr>
+</table>
+
+<h3>6.4 Аналитика</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.4.1</td><td>Графики и цифры</td><td></td><td></td></tr>
+  <tr><td>6.4.2</td><td>Переключение периода</td><td></td><td></td></tr>
+  <tr><td>6.4.3</td><td>Выгрузка отчёта</td><td></td><td></td></tr>
+</table>
+
+<h3>6.5 Расписание</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.5.1</td><td>Выбор мастера салона</td><td></td><td></td></tr>
+  <tr><td>6.5.2</td><td>Вкл/выкл рабочий день</td><td></td><td></td></tr>
+  <tr><td>6.5.3</td><td>Время «с» и «до»</td><td></td><td></td></tr>
+  <tr><td>6.5.4</td><td>«Сохранить»</td><td></td><td></td></tr>
+  <tr><td>6.5.5</td><td>Добавить исключение (выходной)</td><td></td><td></td></tr>
+  <tr><td>6.5.6</td><td>Удалить исключение</td><td></td><td></td></tr>
+</table>
+
+<h3>6.6 Услуги и прайс</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.6.1</td><td>Список услуг</td><td></td><td></td></tr>
+  <tr><td>6.6.2</td><td>«+ Услуга»</td><td></td><td></td></tr>
+  <tr><td>6.6.3</td><td>Редактировать услугу</td><td></td><td></td></tr>
+  <tr><td>6.6.4</td><td>Удалить / скрыть</td><td></td><td></td></tr>
+  <tr><td>6.6.5</td><td>Фото услуги</td><td></td><td></td></tr>
+  <tr><td>6.6.6</td><td>Сохранение</td><td></td><td></td></tr>
+</table>
+
+<h3>6.7 Отзывы</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.7.1</td><td>Список отзывов</td><td></td><td></td></tr>
+  <tr><td>6.7.2</td><td>Ответ на отзыв</td><td></td><td></td></tr>
+  <tr><td>6.7.3</td><td>Опубликовать / скрыть</td><td></td><td></td></tr>
+</table>
+
+<h3>6.8 Повторные визиты</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.8.1</td><td>Включение функции</td><td></td><td></td></tr>
+  <tr><td>6.8.2</td><td>Текст приглашения</td><td></td><td></td></tr>
+  <tr><td>6.8.3</td><td>Сохранить</td><td></td><td></td></tr>
+</table>
+
+<h3>6.9 Мастера (команда)</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.9.1</td><td>Список мастеров</td><td></td><td></td></tr>
+  <tr><td>6.9.2</td><td>Добавить мастера</td><td></td><td></td></tr>
+  <tr><td>6.9.3</td><td>Редактировать</td><td></td><td></td></tr>
+  <tr><td>6.9.4</td><td>Деактивировать / удалить</td><td></td><td></td></tr>
+</table>
+
+<h3>6.10 Тема оформления</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.10.1</td><td>Выбор темы</td><td></td><td></td></tr>
+  <tr><td>6.10.2</td><td>Проверка на странице клиента</td><td></td><td></td></tr>
+</table>
+
+<h3>6.11 Профиль</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.11.1</td><td>Вкладки: Профиль, Портфолио, Контакты, Соцсети</td><td></td><td></td></tr>
+  <tr><td>6.11.2</td><td>Имя, описание, телефон</td><td></td><td></td></tr>
+  <tr><td>6.11.3</td><td>Часовой пояс</td><td></td><td></td></tr>
+  <tr><td>6.11.4</td><td>Адрес и карта</td><td></td><td></td></tr>
+  <tr><td>6.11.5</td><td>Логотип</td><td></td><td></td></tr>
+  <tr><td>6.11.6</td><td>Видео-рил</td><td></td><td></td></tr>
+  <tr><td>6.11.7</td><td>Портфолио: добавить</td><td></td><td></td></tr>
+  <tr><td>6.11.8</td><td>Портфолио: удалить</td><td></td><td></td></tr>
+  <tr><td>6.11.9</td><td>Соцсети</td><td></td><td></td></tr>
+  <tr><td>6.11.10</td><td>«Сохранить»</td><td></td><td></td></tr>
+</table>
+
+<h3>6.12 Оплата</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.12.1</td><td>Баланс</td><td></td><td></td></tr>
+  <tr><td>6.12.2</td><td>Пополнить баланс</td><td></td><td></td></tr>
+  <tr><td>6.12.3</td><td>Смена тарифа</td><td></td><td></td></tr>
+  <tr><td>6.12.4</td><td>История операций</td><td></td><td></td></tr>
+</table>
+
+<h3>6.13 Общее в кабинете</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>6.13.1</td><td>Выход из аккаунта</td><td></td><td></td></tr>
+  <tr><td>6.13.2</td><td>Меню на телефоне (бургер)</td><td></td><td></td></tr>
+  <tr><td>6.13.3</td><td>Рассылка клиентам</td><td></td><td></td></tr>
+  <tr><td>6.13.4</td><td>Чат с клиентами</td><td></td><td></td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<h2>7. Страница клиента — https://woner.ru/m/...</h2>
+
+<h3>7.1 Вход через мессенджер</h3>
+<table>
+  <tr><th>№</th><th>Кнопка</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>7.1.1</td><td>«Продолжить в Telegram»</td><td></td><td></td></tr>
+  <tr><td>7.1.2</td><td>«Продолжить в MAX»</td><td></td><td></td></tr>
+  <tr><td>7.1.3</td><td>Фото и имя мастера</td><td></td><td></td></tr>
+</table>
+
+<h3>7.2 Вкладки</h3>
+<table>
+  <tr><th>№</th><th>Вкладка</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>7.2.1</td><td>Главная</td><td></td><td></td></tr>
+  <tr><td>7.2.2</td><td>Запись</td><td></td><td></td></tr>
+  <tr><td>7.2.3</td><td>Мои записи</td><td></td><td></td></tr>
+  <tr><td>7.2.4</td><td>Отзывы</td><td></td><td></td></tr>
+</table>
+
+<h3>7.3 Главная вкладка</h3>
+<table>
+  <tr><th>№</th><th>Элемент</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>7.3.1</td><td>Портфолио — листание фото</td><td></td><td></td></tr>
+  <tr><td>7.3.2</td><td>Видео</td><td></td><td></td></tr>
+  <tr><td>7.3.3</td><td>Услуга → запись</td><td></td><td></td></tr>
+  <tr><td>7.3.4</td><td>Карта / адрес</td><td></td><td></td></tr>
+  <tr><td>7.3.5</td><td>Соцсети</td><td></td><td></td></tr>
+  <tr><td>7.3.6</td><td>Позвонить мастеру</td><td></td><td></td></tr>
+</table>
+
+<h3>7.4 Запись — полный сценарий (ВАЖНО!)</h3>
+<table>
+  <tr><th>№</th><th>Шаг</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>7.4.1</td><td>Выбор мастера</td><td></td><td></td></tr>
+  <tr><td>7.4.2</td><td>Выбор услуги</td><td></td><td></td></tr>
+  <tr><td>7.4.3</td><td>Выбор даты</td><td></td><td></td></tr>
+  <tr><td>7.4.4</td><td>Выбор слота — слот ОСТАЁТСЯ выбранным</td><td></td><td></td></tr>
+  <tr><td>7.4.5</td><td>«Далее» активна после слота</td><td></td><td></td></tr>
+  <tr><td>7.4.6</td><td>Имя и телефон</td><td></td><td></td></tr>
+  <tr><td>7.4.7</td><td>Подтвердить запись</td><td></td><td></td></tr>
+  <tr><td>7.4.8</td><td>Экран успеха</td><td></td><td></td></tr>
+  <tr><td>7.4.9</td><td>Виден часовой пояс мастера</td><td></td><td></td></tr>
+  <tr><td>7.4.10</td><td>«Назад» на каждом шаге</td><td></td><td></td></tr>
+</table>
+
+<h3>7.5 Мои записи (клиент)</h3>
+<table>
+  <tr><th>№</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>7.5.1</td><td>Список записей</td><td></td><td></td></tr>
+  <tr><td>7.5.2</td><td>Отменить</td><td></td><td></td></tr>
+  <tr><td>7.5.3</td><td>Перенести</td><td></td><td></td></tr>
+</table>
+
+<h3>7.6 Отзывы (клиент)</h3>
+<table>
+  <tr><th>№</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>7.6.1</td><td>Список отзывов</td><td></td><td></td></tr>
+  <tr><td>7.6.2</td><td>Оставить отзыв</td><td></td><td></td></tr>
+  <tr><td>7.6.3</td><td>Фото к отзыву (до 3)</td><td></td><td></td></tr>
+</table>
+
+<h2>8. Бот Telegram (на телефоне)</h2>
+<table>
+  <tr><th>№</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>8.1</td><td>/start</td><td></td><td></td></tr>
+  <tr><td>8.2</td><td>«Записаться» → woner.ru</td><td></td><td></td></tr>
+  <tr><td>8.3</td><td>Запись через сайт до конца</td><td></td><td></td></tr>
+  <tr><td>8.4</td><td>«Мои записи»</td><td></td><td></td></tr>
+  <tr><td>8.5</td><td>«Отменить запись»</td><td></td><td></td></tr>
+  <tr><td>8.6</td><td>/help</td><td></td><td></td></tr>
+  <tr><td>8.7</td><td>/my</td><td></td><td></td></tr>
+  <tr><td>8.8</td><td>Кнопки меню внизу</td><td></td><td></td></tr>
+</table>
+
+<h2>9. Бот MAX (на телефоне)</h2>
+<table>
+  <tr><th>№</th><th>Действие</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>9.1</td><td>/start</td><td></td><td></td></tr>
+  <tr><td>9.2</td><td>«Записаться»</td><td></td><td></td></tr>
+  <tr><td>9.3</td><td>Запись до конца</td><td></td><td></td></tr>
+  <tr><td>9.4</td><td>«Мои записи»</td><td></td><td></td></tr>
+  <tr><td>9.5</td><td>Отмена записи</td><td></td><td></td></tr>
+  <tr><td>9.6</td><td>/help</td><td></td><td></td></tr>
+</table>
+
+<h2>10. Сквозные сценарии (обязательно)</h2>
+<table>
+  <tr><th>№</th><th>Сценарий</th><th>Статус</th><th>Комментарий</th></tr>
+  <tr><td>10.1</td><td>Клиент записался → видно у мастера</td><td></td><td></td></tr>
+  <tr><td>10.2</td><td>Мастер создал запись → видно у клиента</td><td></td><td></td></tr>
+  <tr><td>10.3</td><td>Клиент отменил → «Отменена» у мастера</td><td></td><td></td></tr>
+  <tr><td>10.4</td><td>Клиент перенёс → новое время у мастера</td><td></td><td></td></tr>
+  <tr><td>10.5</td><td>Весь путь записи на телефоне без сбоев</td><td></td><td></td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<h2>11. БЛАНК ОТЧЁТА (заполнить и отправить руководителю)</h2>
+
+<table>
+  <tr><th colspan="2">СВОДКА</th></tr>
+  <tr><td>Всего проверок</td><td></td></tr>
+  <tr><td>OK</td><td></td></tr>
+  <tr><td>БАГ</td><td></td></tr>
+  <tr><td>Н/П</td><td></td></tr>
+  <tr><td>ВОПРОС</td><td></td></tr>
+  <tr><td>Общая оценка</td><td>☐ Готов к работе &nbsp; ☐ Есть критичные баги &nbsp; ☐ Нужны доработки</td></tr>
+</table>
+
+<h3>Критичный баг №1</h3>
+<table>
+  <tr><td><strong>Раздел</strong></td><td></td></tr>
+  <tr><td><strong>Шаги</strong></td><td>1) &nbsp; 2) &nbsp; 3)</td></tr>
+  <tr><td><strong>Ожидание</strong></td><td></td></tr>
+  <tr><td><strong>Факт</strong></td><td></td></tr>
+  <tr><td><strong>Устройство / браузер</strong></td><td></td></tr>
+  <tr><td><strong>Скриншот</strong></td><td>☐ приложен &nbsp; Файл: _______________</td></tr>
+</table>
+
+<h3>Критичный баг №2</h3>
+<table>
+  <tr><td><strong>Раздел</strong></td><td></td></tr>
+  <tr><td><strong>Шаги</strong></td><td></td></tr>
+  <tr><td><strong>Ожидание</strong></td><td></td></tr>
+  <tr><td><strong>Факт</strong></td><td></td></tr>
+</table>
+
+<h3>Некритичные баги</h3>
+<table>
+  <tr><th>№</th><th>Описание</th></tr>
+  <tr><td>1</td><td></td></tr>
+  <tr><td>2</td><td></td></tr>
+  <tr><td>3</td><td></td></tr>
+</table>
+
+<h3>Итог по разделам</h3>
+<table>
+  <tr><th>Раздел</th><th>OK / БАГ (кратко)</th></tr>
+  <tr><td>1. Общие проверки</td><td></td></tr>
+  <tr><td>2. Лендинг</td><td></td></tr>
+  <tr><td>3. Юридические</td><td></td></tr>
+  <tr><td>4–5. Регистрация / Вход</td><td></td></tr>
+  <tr><td>6. Кабинет мастера</td><td></td></tr>
+  <tr><td>7. Страница клиента</td><td></td></tr>
+  <tr><td>8. Telegram-бот</td><td></td></tr>
+  <tr><td>9. MAX-бот</td><td></td></tr>
+  <tr><td>10. Сквозные сценарии</td><td></td></tr>
+</table>
+
+<h3>Комментарий тестировщика</h3>
+<p>_______________________________________________________________________________</p>
+<p>_______________________________________________________________________________</p>
+<p>_______________________________________________________________________________</p>
+
+<p><strong>Подпись:</strong> ______________________ &nbsp; <strong>Дата:</strong> ______________________</p>
+
+<h2>Памятка для новичка</h2>
+<ol>
+  <li>Не пропускайте кнопки — нажимайте и записывайте результат.</li>
+  <li>Сначала компьютер, потом телефон.</li>
+  <li>Запись клиента — главный сценарий. Если сломан — это критичный баг.</li>
+  <li>Смело пишите «ВОПРОС», если непонятно.</li>
+  <li>Один баг = одно описание, не смешивайте.</li>
+</ol>
+
+</body>
+</html>

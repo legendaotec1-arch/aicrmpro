@@ -13,6 +13,8 @@ if (process.env.NODE_ENV === 'production') {
   assertSecurityEnv();
 }
 
+const { createCorsOriginChecker } = require('./utils/corsOrigins');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -32,7 +34,7 @@ async function cleanupPastScheduleExceptionsOnStartup() {
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: createCorsOriginChecker(),
   credentials: true
 }));
 app.use(express.json());

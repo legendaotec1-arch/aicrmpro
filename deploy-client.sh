@@ -34,5 +34,5 @@ fi
 
 echo ""
 echo "========================================"
-echo "Done! Changes are live at https://masterclient45.ru"
+echo "Done! Changes are live at https://woner.ru"
 echo "========================================"
