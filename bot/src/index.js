@@ -196,7 +196,7 @@ async function sendMaxMessage(userId, text, keyboardRows = null, options = {}) {
   await api.post('/messages', body, { params: { user_id: userId } });
 }
 
-async function sendMaxImageByUrl(userId, imageUrl, caption = '') {
+async function sendMaxImageByUrl(userId, imageUrl, caption = '', keyboardRows = null) {
   let retries = 3;
   while (retries > 0) {
     try {
@@ -243,13 +243,16 @@ async function sendMaxImageByUrl(userId, imageUrl, caption = '') {
         return false;
       }
 
-      // 4) отправляем сообщение с фото + кнопками
+      // 4) отправляем сообщение с фото + опционально кнопками
       const body = {
         text: caption || '',
         attachments: [
           { type: 'image', payload: { token: uploadToken } }
         ]
       };
+      if (keyboardRows?.length) {
+        body.attachments.push({ type: 'inline_keyboard', payload: { buttons: keyboardRows } });
+      }
       await api.post('/messages', body, { params: { user_id: userId } });
       console.log('MAX image sent successfully, token:', uploadToken);
       return true;
@@ -620,14 +623,21 @@ app.post('/webhook', async (req, res) => {
 
 app.post('/notify', requireInternalSecret, async (req, res) => {
   try {
-    const { maxUserId, message, replyUrl, replyText } = req.body;
-    if (!maxUserId || !message) {
+    const { maxUserId, message, replyUrl, replyText, imageUrl } = req.body;
+    if (!maxUserId || (!message && !imageUrl)) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     const keyboard = replyUrl
       ? [[linkBtn(replyText || 'Ответить мастеру', replyUrl)]]
       : null;
-    await sendMaxMessage(maxUserId, message, keyboard, { format: 'markdown' });
+    if (imageUrl) {
+      const sent = await sendMaxImageByUrl(maxUserId, imageUrl, message || '', keyboard);
+      if (!sent) {
+        return res.status(500).json({ error: 'Failed to send image' });
+      }
+    } else {
+      await sendMaxMessage(maxUserId, message, keyboard, { format: 'markdown' });
+    }
     res.json({ success: true });
   } catch (error) {
     console.error('MAX notify error:', error.response?.data || error.message);

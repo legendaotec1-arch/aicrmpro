@@ -6,10 +6,18 @@ async function sendMessengerNotification(client, message, options = {}) {
   const telegramBotUrl = process.env.TELEGRAM_BOT_URL || 'http://localhost:3002';
   const channel = options.channel || 'all';
   const headers = internalAuthHeaders();
+  const imageUrl = options.imageUrl || null;
   let sent = 0;
 
   const sendTelegram = channel === 'all' || channel === 'telegram';
   const sendMax = channel === 'all' || channel === 'max';
+
+  const payload = {
+    message,
+    replyUrl: options.replyUrl,
+    replyText: options.replyText,
+    ...(imageUrl ? { imageUrl } : {}),
+  };
 
   if (sendTelegram && client.telegram_user_id) {
     try {
@@ -17,9 +25,7 @@ async function sendMessengerNotification(client, message, options = {}) {
         `${telegramBotUrl}/notify`,
         {
           telegramUserId: client.telegram_user_id,
-          message,
-          replyUrl: options.replyUrl,
-          replyText: options.replyText
+          ...payload,
         },
         { headers }
       );
@@ -35,9 +41,7 @@ async function sendMessengerNotification(client, message, options = {}) {
         `${maxBotUrl}/notify`,
         {
           maxUserId: client.max_user_id,
-          message,
-          replyUrl: options.replyUrl,
-          replyText: options.replyText
+          ...payload,
         },
         { headers }
       );
@@ -54,9 +58,7 @@ async function sendMessengerNotification(client, message, options = {}) {
           `${telegramBotUrl}/notify`,
           {
             telegramUserId: client.telegram_user_id,
-            message,
-            replyUrl: options.replyUrl,
-            replyText: options.replyText
+            ...payload,
           },
           { headers }
         );

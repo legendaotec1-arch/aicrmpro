@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const db = require('../config/database');
 const { sendMessengerNotification } = require('../utils/notify');
-const { renderInviteMessage, buildBookingLink } = require('../utils/repeatInvite');
+const { renderInviteMessage, buildBookingLink, resolveBookingLink } = require('../utils/repeatInvite');
 
 function formatTime(date) {
   return new Date(date).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -126,7 +126,7 @@ async function sendRepeatInvites() {
         [salon.id, days]
       );
 
-      const bookingLink = buildBookingLink(salon.id);
+      const bookingLink = await resolveBookingLink(salon.id);
       const salonName = salon.salon_name || salon.name;
 
       for (const apt of appointments.rows) {

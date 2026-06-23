@@ -42,7 +42,7 @@ const NAV_GROUPS = [
     title: 'Продвижение',
     items: [
       { id: 'reviews', label: 'Отзывы', Icon: Star, badge: 'reviewsPending' },
-      { id: 'invites', label: 'Повторные визиты', Icon: RefreshCw }
+      { id: 'invites', label: 'Рассылки', Icon: RefreshCw }
     ]
   },
   {

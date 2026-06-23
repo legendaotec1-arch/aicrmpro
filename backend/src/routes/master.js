@@ -39,6 +39,8 @@ const { upsertScheduleException, cleanupPastScheduleExceptions, salonTodayDateSt
 const { listRussianTimezones, getTimezoneLabel, normalizeTimezone } = require('../utils/salonTime');
 const { getSalonTimezone } = require('../utils/salonTimezone');
 const { sendMessengerNotification } = require('../utils/notify');
+const { fetchBroadcastRecipients } = require('../utils/broadcast');
+const { getPublicUrl } = require('../utils/links');
 const { buildSalonAnalytics, buildAnalyticsExportXlsx } = require('../utils/salonAnalytics');
 const {
   getOrCreateConversation,
@@ -61,6 +63,7 @@ const {
   renderInviteMessage,
   getSalonInviteSettings,
   buildBookingLink,
+  resolveBookingLink,
   DEFAULT_MESSAGE
 } = require('../utils/repeatInvite');
 const { sanitizeMasterMediaRow, sanitizePortfolioRow } = require('../utils/mediaResolve');
@@ -86,6 +89,26 @@ const router = express.Router();
 
 function buildClientWebUrl(masterId, channel, userId, tab = 'booking') {
   return buildSignedClientWebUrl(masterId, channel, userId, tab ? { tab } : {});
+}
+
+function toAbsoluteUploadUrl(pathOrUrl) {
+  if (!pathOrUrl) return null;
+  const raw = String(pathOrUrl).trim();
+  if (!raw) return null;
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+  const base = getPublicUrl();
+  return `${base}${raw.startsWith('/') ? raw : `/${raw}`}`;
+}
+
+function parseBroadcastBody(body = {}) {
+  return {
+    message: String(body.message || '').trim(),
+    image_url: body.image_url ? String(body.image_url).trim() : null,
+    channel: body.channel || 'all',
+    audience: body.audience || 'all',
+    inactive_days: Number(body.inactive_days) || 30,
+    client_ids: Array.isArray(body.client_ids) ? body.client_ids : [],
+  };
 }
 
 // Middleware для проверки авторизации (владелец или мастер команды)
@@ -1416,61 +1439,85 @@ router.post('/me/clients/:clientId/message', authMiddleware, async (req, res) =>
 });
 
 // Рассылка клиентам
+router.get('/me/broadcast/preview', authMiddleware, requireOwner, async (req, res) => {
+  try {
+    const opts = parseBroadcastBody({
+      channel: req.query.channel,
+      audience: req.query.audience,
+      inactive_days: req.query.inactive_days,
+      client_ids: req.query.client_ids ? String(req.query.client_ids).split(',').filter(Boolean) : [],
+    });
+    const recipients = await fetchBroadcastRecipients(req.masterId, opts);
+    res.json({
+      count: recipients.length,
+      recipients: recipients.map((r) => ({
+        id: r.id,
+        name: r.name,
+        has_telegram: !!r.telegram_user_id,
+        has_max: !!r.max_user_id,
+        last_visit: r.last_visit,
+      })),
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка при подсчёте получателей' });
+  }
+});
+
+router.post('/me/broadcast/upload', authMiddleware, requireOwner, uploadImage.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не загружен' });
+    }
+    const image_url = `/uploads/${req.file.filename}`;
+    res.json({ image_url, absolute_url: toAbsoluteUploadUrl(image_url) });
+  } catch (error) {
+    res.status(500).json({ error: 'Ошибка при загрузке изображения' });
+  }
+});
+
 router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
   try {
-    const { message, client_ids } = req.body;
-
-    let clients;
-    if (client_ids && client_ids.length > 0) {
-      clients = await db.query(
-        `SELECT DISTINCT c.id, c.messenger, c.max_user_id, c.telegram_user_id
-         FROM clients c
-         JOIN appointments a ON a.client_id = c.id
-         WHERE c.id = ANY($1) AND a.master_id = $2
-         AND (c.max_user_id IS NOT NULL OR c.telegram_user_id IS NOT NULL)`,
-        [client_ids, req.masterId]
-      );
-    } else {
-      clients = await db.query(
-        `SELECT c.id, c.messenger, c.max_user_id, c.telegram_user_id FROM clients c
-         JOIN appointments a ON a.client_id = c.id
-         WHERE a.master_id = $1
-         AND (c.max_user_id IS NOT NULL OR c.telegram_user_id IS NOT NULL)`,
-        [req.masterId]
-      );
+    const opts = parseBroadcastBody(req.body);
+    if (!opts.message && !opts.image_url) {
+      return res.status(400).json({ error: 'Введите текст или добавьте изображение' });
     }
 
-    const maxBotUrl = process.env.MAX_BOT_URL || 'http://localhost:3001';
-    const telegramBotUrl = process.env.TELEGRAM_BOT_URL || 'http://localhost:3002';
+    const recipients = await fetchBroadcastRecipients(req.masterId, opts);
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: 'Нет получателей для рассылки' });
+    }
+
+    const imageUrl = toAbsoluteUploadUrl(opts.image_url);
+    const notifyText = opts.message
+      ? (opts.image_url ? opts.message : `💬 Сообщение от салона:\n\n${opts.message}`)
+      : '';
+
     let sent = 0;
+    let failed = 0;
 
-    for (const client of clients.rows) {
-      try {
-        if (client.messenger === 'telegram' && client.telegram_user_id) {
-          await axios.post(`${telegramBotUrl}/notify`, {
-            telegramUserId: client.telegram_user_id,
-            message,
-            replyUrl: buildClientWebUrl(req.masterId, 'telegram', client.telegram_user_id, 'chat'),
-            replyText: 'Ответить мастеру'
-          }, { headers: internalAuthHeaders() });
-          sent++;
-        } else if (client.max_user_id) {
-          await axios.post(`${maxBotUrl}/notify`, {
-            maxUserId: client.max_user_id,
-            message,
-            replyUrl: buildClientWebUrl(req.masterId, 'max', client.max_user_id, 'chat'),
-            replyText: 'Ответить мастеру'
-          }, { headers: internalAuthHeaders() });
-          sent++;
-        }
-      } catch (err) {
-        console.error('Broadcast error for client', client.id, err.message);
+    for (const client of recipients) {
+      const notifyOpts = {
+        channel: opts.channel,
+        ...(imageUrl ? { imageUrl } : {}),
+      };
+      if (client.telegram_user_id) {
+        notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'telegram', client.telegram_user_id, 'booking');
+        notifyOpts.replyText = 'Записаться';
+      } else if (client.max_user_id) {
+        notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'max', client.max_user_id, 'booking');
+        notifyOpts.replyText = 'Записаться';
       }
+
+      const ok = await sendMessengerNotification(client, notifyText, notifyOpts);
+      if (ok) sent += 1;
+      else failed += 1;
     }
 
-    res.json({ success: true, recipients: sent });
+    res.json({ success: true, recipients: sent, failed, total: recipients.length });
   } catch (error) {
-    res.status(500).json({ error: 'Ошибка при отправке рассылки' });
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка при отправке рассылки' });
   }
 });
 
@@ -1684,9 +1731,10 @@ router.get('/me/repeat-invites', authMiddleware, async (req, res) => {
       [req.masterId]
     );
     if (row.rows.length === 0) return res.status(404).json({ error: 'Не найден' });
+    const booking_link = await resolveBookingLink(req.masterId);
     res.json({
       ...getSalonInviteSettings(row.rows[0]),
-      booking_link: buildBookingLink(req.masterId),
+      booking_link,
       default_message: DEFAULT_MESSAGE
     });
   } catch (error) {
@@ -1728,10 +1776,11 @@ router.post('/me/clients/:clientId/repeat-invite', authMiddleware, async (req, r
 
     const c = client.rows[0];
     const salonRow = salon.rows[0];
+    const bookingLink = await resolveBookingLink(req.masterId);
     const msg = renderInviteMessage(salonRow.repeat_invite_message, {
       clientName: c.name,
       salonName: salonRow.salon_name || salonRow.name,
-      bookingLink: buildBookingLink(req.masterId)
+      bookingLink,
     });
 
     const sent = await sendMessengerNotification(c, msg, { channel: 'all' });

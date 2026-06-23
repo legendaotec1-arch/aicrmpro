@@ -334,14 +334,21 @@ process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 app.post('/notify', requireInternalSecret, async (req, res) => {
   try {
-    const { telegramUserId, message, replyUrl, replyText } = req.body;
-    if (!telegramUserId || !message) {
+    const { telegramUserId, message, replyUrl, replyText, imageUrl } = req.body;
+    if (!telegramUserId || (!message && !imageUrl)) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     const options = replyUrl
       ? Markup.inlineKeyboard([[webAppButton(replyText || 'Ответить мастеру', replyUrl)]])
       : undefined;
-    await bot.telegram.sendMessage(telegramUserId, message, options);
+    if (imageUrl) {
+      await bot.telegram.sendPhoto(telegramUserId, imageUrl, {
+        caption: message || undefined,
+        ...(options ? { reply_markup: options.reply_markup } : {}),
+      });
+    } else {
+      await bot.telegram.sendMessage(telegramUserId, message, options);
+    }
     res.json({ success: true });
   } catch (error) {
     console.error('Telegram notify error:', error.message);

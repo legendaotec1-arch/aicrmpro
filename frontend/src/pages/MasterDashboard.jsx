@@ -110,9 +110,6 @@ export default function MasterDashboard() {
 
   const [showManualBook, setShowManualBook] = useState(false);
 
-  const [showBroadcast, setShowBroadcast] = useState(false);
-  const [broadcastMessage, setBroadcastMessage] = useState('');
-
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [showAppointmentDetail, setShowAppointmentDetail] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
@@ -517,16 +514,8 @@ export default function MasterDashboard() {
     }
   };
 
-  const handleBroadcast = async () => {
-    if (!broadcastMessage.trim()) return;
-    try {
-      const res = await api.post('/master/me/broadcast', { message: broadcastMessage });
-      toast(`Рассылка: ${res.data.recipients} получателей`);
-      setShowBroadcast(false);
-      setBroadcastMessage('');
-    } catch {
-      toast('Ошибка рассылки', 'error');
-    }
+  const handleBroadcast = () => {
+    setSearchParams({ section: 'invites', tab: 'broadcast' });
   };
 
   const openResolveAppointment = (aptOrId, status) => {
@@ -765,7 +754,12 @@ export default function MasterDashboard() {
       )}
 
       {activeSection === 'invites' && (
-        <RepeatInvitesSection api={api} toast={toast} />
+        <RepeatInvitesSection
+          api={api}
+          toast={toast}
+          clients={clients}
+          initialTab={searchParams.get('tab') === 'broadcast' ? 'broadcast' : 'auto'}
+        />
       )}
 
       {activeSection === 'clients' && (
@@ -781,7 +775,7 @@ export default function MasterDashboard() {
           onOpen={(client) => setSelectedClientId(client.id)}
           onMessage={openClientMessage}
           onDelete={setClientDeleteTarget}
-          onBroadcast={() => setShowBroadcast(true)}
+          onBroadcast={handleBroadcast}
         />
       )}
 
@@ -1146,15 +1140,6 @@ export default function MasterDashboard() {
         toast={toast}
         onSuccess={loadData}
       />
-
-      <Modal open={showBroadcast} onClose={() => setShowBroadcast(false)} title="Рассылка" description="Сообщение уйдёт клиентам в MAX или Telegram" footer={
-        <>
-          <Button variant="secondary" onClick={() => setShowBroadcast(false)}>Отмена</Button>
-          <Button onClick={handleBroadcast}>Отправить</Button>
-        </>
-      }>
-        <Textarea value={broadcastMessage} onChange={(e) => setBroadcastMessage(e.target.value)} placeholder="Текст сообщения..." rows={5} />
-      </Modal>
 
       <ClientDetailModal
         clientId={selectedClientId}
