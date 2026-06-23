@@ -1,0 +1,399 @@
+const express = require('express');
+const db = require('../config/database');
+const repo = require('../seo/repository');
+const { seedSeoContent } = require('../seo/seed');
+const { runSeoAudit, getLatestAudit } = require('../seo/audit');
+const { buildSeoDashboard } = require('../seo/dashboard');
+const { syncSearchMetrics } = require('../seo/searchMetrics');
+const { buildRobotsTxt } = require('../seo/robots');
+const {
+  buildUrlSet,
+  collectSitemapUrls,
+  buildSitemapIndexXml,
+} = require('../seo/sitemap');
+const { buildPageJsonLd, buildArticleJsonLd } = require('../seo/jsonld');
+const { SITE_URL, CLUSTERS, BLOG_CATEGORIES } = require('../seo/config');
+const { NICHE_CATALOG } = require('../seo/niches');
+const { adminAuthMiddleware } = require('../utils/adminAuth');
+
+const CATEGORY_LABELS = {
+  beauty: 'Бьюти и красота',
+  medical: 'Медицина и здоровье',
+  education: 'Образование',
+  fitness: 'Фитнес и спорт',
+  auto: 'Автоуслуги',
+  services: 'Услуги и сервис',
+};
+
+const router = express.Router();
+
+function mapPage(row) {
+  if (!row) return null;
+  const extras = typeof row.extras === 'string' ? JSON.parse(row.extras) : (row.extras || {});
+  const canonicalSlug = extras.canonicalSlug || row.slug;
+  return {
+    ...row,
+    sections: typeof row.sections === 'string' ? JSON.parse(row.sections) : row.sections,
+    faq: typeof row.faq === 'string' ? JSON.parse(row.faq) : row.faq,
+    toc: typeof row.toc === 'string' ? JSON.parse(row.toc) : (row.toc || []),
+    extras,
+    canonicalUrl: `${SITE_URL}/${canonicalSlug}`,
+    related_slugs: row.related_slugs || [],
+  };
+}
+
+function mapArticle(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    sections: typeof row.sections === 'string' ? JSON.parse(row.sections) : row.sections,
+    faq: typeof row.faq === 'string' ? JSON.parse(row.faq) : row.faq,
+    toc: typeof row.toc === 'string' ? JSON.parse(row.toc) : row.toc,
+    related_slugs: row.related_slugs || [],
+  };
+}
+
+router.get('/page/:slug', async (req, res) => {
+  try {
+    const page = mapPage(await repo.getPageBySlug(req.params.slug));
+    if (!page) return res.status(404).json({ error: 'Страница не найдена' });
+
+    const links = await repo.getInternalLinks(page.slug);
+    const breadcrumbs = [
+      { name: 'Главная', url: SITE_URL },
+      { name: 'Решения', url: `${SITE_URL}/resheniya` },
+      { name: page.h1, url: `${SITE_URL}/${page.slug}` },
+    ];
+    const jsonLd = buildPageJsonLd(page, breadcrumbs);
+
+    res.json({ page, internalLinks: links, breadcrumbs, jsonLd });
+  } catch (err) {
+    console.error('SEO page:', err);
+    res.status(500).json({ error: 'Ошибка загрузки страницы' });
+  }
+});
+
+router.get('/pages', async (req, res) => {
+  try {
+    const pages = await repo.listPages({
+      cluster: req.query.cluster,
+      pageType: req.query.type,
+      limit: Math.min(Number(req.query.limit) || 100, 500),
+    });
+    res.json({ pages, clusters: CLUSTERS });
+  } catch (err) {
+    console.error('SEO pages list:', err);
+    res.status(500).json({ error: 'Ошибка загрузки списка' });
+  }
+});
+
+router.get('/article/:slug', async (req, res) => {
+  try {
+    const article = mapArticle(await repo.getArticleBySlug(req.params.slug));
+    if (!article) return res.status(404).json({ error: 'Статья не найдена' });
+
+    const breadcrumbs = [
+      { name: 'Главная', url: SITE_URL },
+      { name: 'Блог', url: `${SITE_URL}/blog` },
+      { name: article.h1, url: `${SITE_URL}/blog/${article.slug}` },
+    ];
+    const jsonLd = buildArticleJsonLd(article, breadcrumbs);
+
+    res.json({ article, breadcrumbs, jsonLd });
+  } catch (err) {
+    console.error('SEO article:', err);
+    res.status(500).json({ error: 'Ошибка загрузки статьи' });
+  }
+});
+
+router.get('/articles', async (req, res) => {
+  try {
+    const articles = await repo.listArticles({
+      category: req.query.category,
+      limit: Math.min(Number(req.query.limit) || 50, 500),
+    });
+    res.json({ articles, categories: BLOG_CATEGORIES });
+  } catch (err) {
+    console.error('SEO articles:', err);
+    res.status(500).json({ error: 'Ошибка загрузки статей' });
+  }
+});
+
+router.get('/hub', async (_req, res) => {
+  try {
+    const [crm, booking, beauty, articles] = await Promise.all([
+      repo.listPages({ cluster: 'crm', limit: 12 }),
+      repo.listPages({ cluster: 'booking', limit: 12 }),
+      repo.listPages({ cluster: 'beauty', limit: 12 }),
+      repo.listArticles({ limit: 6 }),
+    ]);
+    res.json({ clusters: CLUSTERS, crm, booking, beauty, articles });
+  } catch (err) {
+    console.error('SEO hub:', err);
+    res.status(500).json({ error: 'Ошибка загрузки хаба' });
+  }
+});
+
+router.get('/hub/resheniya', async (_req, res) => {
+  try {
+    const [solutions, crm, booking, features, compare] = await Promise.all([
+      repo.listPages({ pageType: 'solution', limit: 30 }),
+      repo.listPages({ cluster: 'crm', limit: 500 }),
+      repo.listPages({ cluster: 'booking', limit: 500 }),
+      repo.listPages({ pageType: 'feature', limit: 150 }),
+      repo.listPages({ pageType: 'compare', limit: 20 }),
+    ]);
+
+    const crmNiche = crm.filter((p) => p.page_type === 'programmatic' && p.slug.startsWith('crm-dlya-'));
+    const bookingNiche = booking.filter((p) => p.page_type === 'programmatic');
+
+    res.json({
+      solutions,
+      crmCore: crm.filter((p) => p.page_type === 'solution'),
+      crmNiche,
+      bookingCore: booking.filter((p) => p.page_type === 'solution'),
+      bookingNiche,
+      features,
+      compare,
+    });
+  } catch (err) {
+    console.error('SEO hub resheniya:', err);
+    res.status(500).json({ error: 'Ошибка загрузки решений' });
+  }
+});
+
+router.get('/hub/otrasli', async (_req, res) => {
+  try {
+    const pages = await repo.listPages({ limit: 500 });
+    const nicheMap = Object.fromEntries(NICHE_CATALOG.map((n) => [n.id, n]));
+    const groups = {};
+
+    for (const p of pages) {
+      if (!p.niche) continue;
+      const n = nicheMap[p.niche];
+      if (!n) continue;
+      const cat = n.category;
+      if (!groups[cat]) {
+        groups[cat] = { id: cat, label: CATEGORY_LABELS[cat] || cat, niches: {} };
+      }
+      if (!groups[cat].niches[n.id]) {
+        groups[cat].niches[n.id] = {
+          id: n.id,
+          label: n.genitive,
+          slugBase: n.slugBase,
+          pages: [],
+        };
+      }
+      const allowed = [
+        `crm-dlya-${n.slugBase}`,
+        `online-zapis-dlya-${n.slugBase}`,
+      ];
+      if (n.bookingNa) allowed.push(`online-zapis-na-${n.bookingNa.slug}`);
+      if (n.bookingV) allowed.push(`online-zapis-v-${n.bookingV.slug}`);
+      if (n.bookingK) allowed.push(`online-zapis-k-${n.bookingK.slug}`);
+      if (allowed.includes(p.slug)) {
+        groups[cat].niches[n.id].pages.push({
+          slug: p.slug,
+          h1: p.h1,
+          cluster: p.cluster,
+        });
+      }
+    }
+
+    const industries = Object.values(groups)
+      .map((g) => ({
+        ...g,
+        niches: Object.values(g.niches).sort((a, b) => a.label.localeCompare(b.label, 'ru')),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+
+    res.json({ industries, categories: CATEGORY_LABELS });
+  } catch (err) {
+    console.error('SEO hub otrasli:', err);
+    res.status(500).json({ error: 'Ошибка загрузки отраслей' });
+  }
+});
+
+router.post('/seed', adminAuthMiddleware, async (req, res) => {
+  try {
+    const result = await seedSeoContent({ force: Boolean(req.body?.force) });
+    res.json(result);
+  } catch (err) {
+    console.error('SEO seed:', err);
+    res.status(500).json({ error: 'Ошибка генерации SEO-страниц' });
+  }
+});
+
+router.post('/audit', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const report = await runSeoAudit(db);
+    res.json(report);
+  } catch (err) {
+    console.error('SEO audit:', err);
+    res.status(500).json({ error: 'Ошибка аудита' });
+  }
+});
+
+router.get('/audit/latest', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const report = await getLatestAudit(db);
+    res.json({ report });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка загрузки аудита' });
+  }
+});
+
+router.get('/dashboard', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const dashboard = await buildSeoDashboard(db);
+    res.json(dashboard);
+  } catch (err) {
+    console.error('SEO dashboard:', err);
+    res.status(500).json({ error: 'Ошибка загрузки SEO-панели' });
+  }
+});
+
+router.post('/metrics/sync', adminAuthMiddleware, async (req, res) => {
+  try {
+    const days = Math.min(Number(req.body?.days) || 28, 90);
+    const result = await syncSearchMetrics(db, { days });
+    const dashboard = await buildSeoDashboard(db);
+    res.json({ sync: result, dashboard });
+  } catch (err) {
+    console.error('SEO metrics sync:', err);
+    res.status(500).json({ error: err.message || 'Ошибка синхронизации метрик' });
+  }
+});
+
+router.post('/articles/sync', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { syncArticlePipeline } = require('../seo/articleCron');
+    const { ensurePublicationSchedule } = require('../seo/publicationSchedule');
+    const result = await syncArticlePipeline(db);
+    if (req.body?.reschedule) {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const pub = await ensurePublicationSchedule(client, { force: true });
+        await client.query('COMMIT');
+        result.rescheduled = pub.rescheduled;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('SEO article sync:', err);
+    res.status(500).json({ error: 'Ошибка синхронизации статей' });
+  }
+});
+
+router.get('/press', async (_req, res) => {
+  try {
+    const { getPressKit } = require('../seo/pressKit');
+    res.json(getPressKit());
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка загрузки пресс-кита' });
+  }
+});
+
+router.get('/external-links', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const { buildExternalLinksDashboard } = require('../seo/externalLinks');
+    res.json(await buildExternalLinksDashboard(db));
+  } catch (err) {
+    console.error('SEO external links:', err);
+    res.status(500).json({ error: 'Ошибка загрузки внешних ссылок' });
+  }
+});
+
+router.patch('/external-links/:id', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { updateExternalLink } = require('../seo/externalLinks');
+    const updated = await updateExternalLink(db, req.params.id, req.body || {});
+    if (!updated) return res.status(400).json({ error: 'Нет данных для обновления' });
+    res.json(updated);
+  } catch (err) {
+    console.error('SEO external link update:', err);
+    res.status(500).json({ error: 'Ошибка обновления' });
+  }
+});
+
+router.post('/external-links/seed', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const { seedExternalLinks } = require('../seo/externalLinks');
+    const result = await seedExternalLinks(db);
+    const { buildExternalLinksDashboard } = require('../seo/externalLinks');
+    const dashboard = await buildExternalLinksDashboard(db);
+    res.json({ seed: result, ...dashboard });
+  } catch (err) {
+    console.error('SEO external links seed:', err);
+    res.status(500).json({ error: 'Ошибка инициализации каталога' });
+  }
+});
+
+router.get('/intelligence', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const { loadIntelligenceDashboard } = require('../seo/seoIntelligence');
+    res.json(await loadIntelligenceDashboard(db));
+  } catch (err) {
+    console.error('SEO intelligence:', err);
+    res.status(500).json({ error: 'Ошибка загрузки SEO-аналитики' });
+  }
+});
+
+router.post('/intelligence/run', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { runSeoIntelligence } = require('../seo/seoIntelligence');
+    const result = await runSeoIntelligence(db, {
+      generatePages: req.body?.generatePages !== false,
+    });
+    const generated = result.pagesGenerated?.slugs;
+    if (generated?.length) {
+      const { notifyIndexNowLater, pathsFromSlugs } = require('../seo/indexNow');
+      notifyIndexNowLater(pathsFromSlugs(generated), { logPrefix: '[indexnow] intel' });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('SEO intelligence run:', err);
+    res.status(500).json({ error: err.message || 'Ошибка анализа' });
+  }
+});
+
+router.get('/indexnow/status', adminAuthMiddleware, async (_req, res) => {
+  const { getIndexNowStatus } = require('../seo/indexNow');
+  res.json(getIndexNowStatus());
+});
+
+router.post('/indexnow/submit', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { notifyIndexNow, getSitemapUrlsForIndexNow, getRecentlyPublishedArticleUrls, getRecentlyUpdatedPageUrls, absoluteUrl } = require('../seo/indexNow');
+    const scope = req.body?.scope || 'recent';
+
+    let urls = [];
+    if (Array.isArray(req.body?.urls) && req.body.urls.length) {
+      urls = req.body.urls.map(absoluteUrl).filter(Boolean);
+    } else if (scope === 'sitemap') {
+      urls = await getSitemapUrlsForIndexNow(db);
+    } else {
+      urls = [
+        ...(await getRecentlyPublishedArticleUrls(db, 24 * 30)),
+        ...(await getRecentlyUpdatedPageUrls(db, 24 * 30)),
+      ];
+      if (!urls.length) {
+        urls = await getSitemapUrlsForIndexNow(db);
+      }
+    }
+
+    const result = await notifyIndexNow(urls, { logPrefix: '[indexnow] manual' });
+    res.json(result);
+  } catch (err) {
+    console.error('IndexNow submit:', err);
+    res.status(500).json({ error: err.message || 'Ошибка IndexNow' });
+  }
+});
+
+module.exports = { router, buildRobotsTxt, buildSitemapIndexXml, collectSitemapUrls, buildUrlSet };

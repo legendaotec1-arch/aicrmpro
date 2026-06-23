@@ -8,18 +8,23 @@ import { formatAuthError } from '../lib/authStorage';
 
 export default function MasterLogin() {
   const navigate = useNavigate();
-  const { login } = useContext(AuthContext);
-  const [formData, setFormData] = useState({ email: '', password: '' });
+  const { requestLoginCode, verifyEmailCode } = useContext(AuthContext);
+  const [step, setStep] = useState('email');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [devCode, setDevCode] = useState('');
 
-  const handleSubmit = async (e) => {
+  const sendCode = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await login(formData.email, formData.password);
-      navigate('/dashboard');
+      const res = await requestLoginCode(email);
+      setEmail(res.email || email);
+      setDevCode(res.devCode || '');
+      setStep('verify');
     } catch (err) {
       setError(formatAuthError(err));
     } finally {
@@ -27,12 +32,75 @@ export default function MasterLogin() {
     }
   };
 
+  const submitCode = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await verifyEmailCode(email, code);
+      navigate('/dashboard', { replace: true });
+    } catch (err) {
+      setError(formatAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (step === 'verify') {
+    return (
+      <AuthLayout title="Код из письма" subtitle={`Отправлен на ${email}`}>
+        {error && (
+          <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+        )}
+        {devCode ? (
+          <p className="mb-4 rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-800">Dev-код: {devCode}</p>
+        ) : null}
+        <form onSubmit={submitCode} className="space-y-4">
+          <Input
+            label="Код подтверждения"
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="123456"
+          />
+          <Button type="submit" className="w-full" size="lg" loading={loading}>
+            Войти в кабинет
+          </Button>
+        </form>
+        <div className="mt-4 flex flex-wrap gap-4 text-sm">
+          <button
+            type="button"
+            className="font-semibold text-primary hover:underline"
+            onClick={async () => {
+              setLoading(true);
+              try {
+                const res = await requestLoginCode(email);
+                setDevCode(res.devCode || '');
+              } catch (err) {
+                setError(formatAuthError(err));
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            Отправить код повторно
+          </button>
+          <button type="button" className="text-ink-secondary hover:text-ink" onClick={() => setStep('email')}>
+            Другой email
+          </button>
+        </div>
+      </AuthLayout>
+    );
+  }
+
   return (
-    <AuthLayout title="С возвращением" subtitle="Войдите в кабинет мастера">
+    <AuthLayout title="С возвращением" subtitle="Вход по коду на email">
       {error && (
         <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
       )}
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={sendCode} className="space-y-4">
         <Input
           label="Email"
           type="email"
@@ -42,23 +110,12 @@ export default function MasterLogin() {
           autoCorrect="off"
           spellCheck={false}
           inputMode="email"
-          value={formData.email}
-          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           placeholder="you@salon.ru"
         />
-        <Input
-          label="Пароль"
-          type="password"
-          required
-          autoComplete="current-password"
-          autoCapitalize="none"
-          autoCorrect="off"
-          value={formData.password}
-          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-          placeholder="••••••••"
-        />
         <Button type="submit" className="w-full" size="lg" loading={loading}>
-          Войти
+          Получить код
         </Button>
       </form>
       <p className="mt-6 text-center text-sm text-ink-secondary">

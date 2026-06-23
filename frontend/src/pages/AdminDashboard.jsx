@@ -10,6 +10,8 @@ import AdminDriveTab from '../components/admin/AdminDriveTab';
 import AdminFinanceTab from '../components/admin/AdminFinanceTab';
 import AdminAdsTab from '../components/admin/AdminAdsTab';
 import AdminVaultTab from '../components/admin/AdminVaultTab';
+import AdminSeoTab from '../components/admin/AdminSeoTab';
+import AdminPartnersTab from '../components/admin/AdminPartnersTab';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -78,6 +80,8 @@ export default function AdminDashboard() {
       {tab === 'drive' ? <AdminDriveTab /> : null}
       {tab === 'finance' ? <AdminFinanceTab /> : null}
       {tab === 'ads' ? <AdminAdsTab /> : null}
+      {tab === 'seo' ? <AdminSeoTab /> : null}
+      {tab === 'partners' ? <AdminPartnersTab /> : null}
       {tab === 'vault' ? <AdminVaultTab /> : null}
     </AdminLayout>
   );

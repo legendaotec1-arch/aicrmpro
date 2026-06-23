@@ -8,6 +8,8 @@ import {
   Megaphone,
   LogOut,
   RefreshCw,
+  LineChart,
+  Handshake,
 } from 'lucide-react';
 import Button from '../ui/Button';
 import BrandName from '../brand/BrandName';
@@ -18,6 +20,8 @@ const TABS = [
   { id: 'drive', label: 'Облако', icon: FolderOpen },
   { id: 'finance', label: 'Финансы', icon: Wallet },
   { id: 'ads', label: 'Реклама', icon: Megaphone },
+  { id: 'seo', label: 'SEO', icon: LineChart },
+  { id: 'partners', label: 'Партнёры', icon: Handshake },
   { id: 'vault', label: 'Доступы', icon: KeyRound },
 ];
 

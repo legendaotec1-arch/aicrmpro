@@ -60,6 +60,36 @@ function sanitizeFileName(name) {
   return cleaned || null;
 }
 
+/** Multer/busboy часто отдают UTF-8 имя файла как latin1 (Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚.pdf). */
+function decodeUploadFileName(name) {
+  if (!name) return '';
+  const raw = String(name).trim();
+  if (!raw) return '';
+
+  if (/[\u0400-\u04FF]/.test(raw)) return raw;
+
+  const decoded = Buffer.from(raw, 'latin1').toString('utf8');
+  if (decoded && decoded !== raw) {
+    if (/[\u0400-\u04FF]/.test(decoded) && !decoded.includes('\uFFFD')) return decoded;
+    if (/[ÐÑÃÂ]/.test(raw) && !/[ÐÑÃÂ]/.test(decoded) && !decoded.includes('\uFFFD')) return decoded;
+  }
+
+  return raw;
+}
+
+function resolveUploadOriginalName(req) {
+  const fromBody = req.body?.originalName ?? req.body?.original_name;
+  const candidate = fromBody || req.file?.originalname || '';
+  const decoded = decodeUploadFileName(candidate);
+  return sanitizeFileName(decoded) || decoded || 'file';
+}
+
+function contentDispositionFilename(name, disposition = 'attachment') {
+  const safe = String(name || 'file');
+  const asciiFallback = safe.replace(/[^\x20-\x7E]/g, '_') || 'file';
+  return `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
 const AD_STATUSES = ['new', 'contacted', 'negotiating', 'agreed', 'paid', 'rejected', 'done'];
 const AD_PLATFORMS = ['telegram', 'instagram', 'youtube', 'vk', 'tiktok', 'blog', 'other'];
 const AD_PRIORITIES = ['low', 'normal', 'high'];
@@ -125,6 +155,9 @@ module.exports = {
   displayNameForEmail,
   getPreviewKind,
   sanitizeFileName,
+  decodeUploadFileName,
+  resolveUploadOriginalName,
+  contentDispositionFilename,
   AD_STATUSES,
   AD_PLATFORMS,
   AD_PRIORITIES,

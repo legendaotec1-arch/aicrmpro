@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import api from '../lib/http.js';
@@ -50,6 +50,9 @@ import { canSubmitBooking, getClientNameError, isValidClientName } from '../lib/
 import { mediaUrl } from '../lib/media';
 import { getClientSession, setClientSession, clearClientSession } from '../lib/clientSession';
 import { withClientAuth } from '../lib/clientApi';
+import SeoHead from '../seo/SeoHead';
+import JsonLd from '../seo/JsonLd';
+import { buildMasterJsonLdBlocks, masterOgImage } from '../lib/masterSeo';
 
 // ============================================================
 // PREMIUM iOS DESIGN TOKENS — INLINE STYLES
@@ -647,8 +650,11 @@ if (typeof document !== 'undefined') {
 // ============================================================
 export default function ClientPage() {
   const { masterId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [master, setMaster] = useState(null);
+  const [pageSeo, setPageSeo] = useState(null);
   const [bookingConfig, setBookingConfig] = useState(null);
   const [portfolio, setPortfolio] = useState([]);
   const [priceList, setPriceList] = useState([]);
@@ -729,6 +735,7 @@ export default function ClientPage() {
       setPriceList(flat);
       setReviewSummary(res.data.reviewSummary || { count: 0, average: null });
       setReviews(res.data.reviews || []);
+      setPageSeo(res.data.seo || null);
     } catch (err) {
       console.error(err);
       const msg = err.response?.data?.error || (err.message !== 'Error' ? err.message : null);
@@ -852,6 +859,30 @@ export default function ClientPage() {
   useEffect(() => {
     loadMasterData();
   }, [loadMasterData]);
+
+  useEffect(() => {
+    const slug = master?.public_slug;
+    if (!slug || masterId === slug) return;
+    navigate(`/m/${slug}${location.search}${location.hash}`, { replace: true });
+  }, [master?.public_slug, masterId, navigate, location.search, location.hash]);
+
+  const masterJsonLd = useMemo(
+    () => (master ? buildMasterJsonLdBlocks(master, priceList, reviewSummary) : []),
+    [master, priceList, reviewSummary]
+  );
+
+  const masterSeoHead = master && pageSeo ? (
+    <>
+      <SeoHead
+        title={pageSeo.title}
+        description={pageSeo.description}
+        canonical={pageSeo.canonical}
+        robots={pageSeo.indexable === false ? 'noindex, follow' : 'index, follow'}
+        ogImage={masterOgImage(master)}
+      />
+      <JsonLd blocks={masterJsonLd} />
+    </>
+  ) : null;
 
   useEffect(() => {
     if (clientAuth) loadAppointments();
@@ -1242,16 +1273,21 @@ export default function ClientPage() {
 
   if (!clientAuth) {
     return (
-      <ClientThemeRoot themeId={clientThemeId}>
-        <ClientAuthGate
-          master={master}
-          masterIdEncoded={masterId}
-          telegramBotUsername={bookingConfig?.telegramBotUsername}
-          telegramBotDeepLink={bookingConfig?.telegramBotDeepLink}
-          maxBotDeepLink={bookingConfig?.maxBotDeepLink}
-          onAuthenticated={handleAuthenticated}
-        />
-      </ClientThemeRoot>
+      <>
+        {masterSeoHead}
+        <ClientThemeRoot themeId={clientThemeId}>
+          <ClientAuthGate
+            master={master}
+            masterIdEncoded={masterId}
+            priceList={priceList}
+            reviewSummary={reviewSummary}
+            telegramBotUsername={bookingConfig?.telegramBotUsername}
+            telegramBotDeepLink={bookingConfig?.telegramBotDeepLink}
+            maxBotDeepLink={bookingConfig?.maxBotDeepLink}
+            onAuthenticated={handleAuthenticated}
+          />
+        </ClientThemeRoot>
+      </>
     );
   }
 
@@ -1260,6 +1296,7 @@ export default function ClientPage() {
   // ============================================================
   return (
     <ClientThemeRoot themeId={clientThemeId}>
+      {masterSeoHead}
       <div
         style={{
           minHeight: '100dvh',

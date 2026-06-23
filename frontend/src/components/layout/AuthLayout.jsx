@@ -3,22 +3,45 @@ import Logo from '../brand/Logo';
 import BrandName from '../brand/BrandName';
 import { SITE_LEGAL } from '../../config/siteLegal';
 
-export default function AuthLayout({ children, title, subtitle }) {
+const HERO = {
+  master: {
+    title: (
+      <>
+        Управляйте
+        <br />
+        <span className="text-white">записями</span>
+        <br />
+        как профи
+      </>
+    ),
+    subtitle:
+      'Кабинет мастера и страница записи. Одна ссылка — Telegram, MAX, ВКонтакте, Instagram*.',
+  },
+  partner: {
+    title: (
+      <>
+        Платформа,
+        <br />
+        <span className="text-white">которая зарабатывает</span>
+        <br />
+        вместе с тобой
+      </>
+    ),
+    subtitle:
+      'Партнёрская программа Woner: делитесь ссылкой, приводите мастеров — получайте 30% с их пополнений и подписки. Мы развиваем продукт, вы строите доход без потолка.',
+  },
+};
+
+export default function AuthLayout({ children, title, subtitle, variant = 'master' }) {
+  const hero = HERO[variant] || HERO.master;
+
   return (
     <div className="min-h-[100dvh] flex overflow-y-auto bg-[#6A5ACD]">
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12">
         <Logo light />
         <div>
-          <h2 className="text-4xl font-black text-white leading-tight">
-            Управляйте
-            <br />
-            <span className="text-white">записями</span>
-            <br />
-            как профи
-          </h2>
-          <p className="mt-4 text-white/70 max-w-sm">
-            Кабинет мастера и страница записи. Одна ссылка — Telegram, MAX, ВКонтакте, Instagram*.
-          </p>
+          <h2 className="text-4xl font-black text-white leading-tight">{hero.title}</h2>
+          <p className="mt-4 text-white/70 max-w-sm">{hero.subtitle}</p>
         </div>
         <div className="text-xs text-white/40 space-y-2">
           <p className="text-white/40">© <BrandName light className="text-white/40" /></p>

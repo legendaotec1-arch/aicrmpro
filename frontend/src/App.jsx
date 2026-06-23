@@ -18,6 +18,19 @@ import OfferPage from './pages/legal/OfferPage';
 import PrivacyPage from './pages/legal/PrivacyPage';
 import PaymentPage from './pages/legal/PaymentPage';
 import YandexMetrika from './components/analytics/YandexMetrika';
+import AlternativeLandingPage from './pages/seo/AlternativeLandingPage';
+import ProgrammaticSeoPage from './pages/seo/ProgrammaticSeoPage';
+import SeoHubPage from './pages/seo/SeoHubPage';
+import SeoSolutionsHubPage from './pages/seo/SeoSolutionsHubPage';
+import SeoIndustriesHubPage from './pages/seo/SeoIndustriesHubPage';
+import BlogIndexPage from './pages/seo/BlogIndexPage';
+import BlogArticlePage from './pages/seo/BlogArticlePage';
+import PressPage from './pages/PressPage';
+import PartnerRegister from './pages/partner/PartnerRegister';
+import PartnerLogin from './pages/partner/PartnerLogin';
+import PartnerDashboard from './pages/partner/PartnerDashboard';
+import { getPartnerToken } from './lib/partnerStorage.js';
+import partnerApi from './lib/partnerApi.js';
 
 const AuthContext = createContext(null);
 
@@ -49,26 +62,25 @@ function AuthProvider({ children }) {
     }
   };
 
-  const login = async (email, password) => {
+  const requestLoginCode = async (email) => {
     const res = await api.post('/auth/login', {
       email: String(email || '').trim().toLowerCase(),
-      password: String(password || '').trim(),
+    });
+    return res.data;
+  };
+
+  const verifyEmailCode = async (email, code) => {
+    const res = await api.post('/auth/verify-email', {
+      email: String(email || '').trim().toLowerCase(),
+      code: String(code || '').trim(),
     });
     saveToken(res.data.token);
     setUser(res.data.master);
     return res.data;
   };
 
-  const register = async (data) => {
-    const res = await api.post('/auth/register', {
-      ...data,
-      email: String(data.email || '').trim().toLowerCase(),
-      password: String(data.password || '').trim(),
-    });
-    saveToken(res.data.token);
-    setUser(res.data.master);
-    return res.data;
-  };
+  const login = requestLoginCode;
+  const register = verifyEmailCode;
 
   const logout = () => {
     clearToken();
@@ -76,7 +88,7 @@ function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, api }}>
+    <AuthContext.Provider value={{ user, loading, login, register, requestLoginCode, verifyEmailCode, logout, api }}>
       {children}
     </AuthContext.Provider>
   );
@@ -113,6 +125,27 @@ function AdminProtectedRoute({ children }) {
   return children;
 }
 
+function PartnerProtectedRoute({ children }) {
+  const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    const token = getPartnerToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    partnerApi.get('/verify')
+      .then((res) => setAuthed(Boolean(res.data?.valid)))
+      .catch(() => setAuthed(false))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <PageLoader />;
+  if (!authed) return <Navigate to="/partner/login" replace />;
+  return children;
+}
+
 function App() {
   return (
     <ToastProvider>
@@ -127,6 +160,29 @@ function App() {
             <Route path="/legal/offer" element={<OfferPage />} />
             <Route path="/legal/privacy" element={<PrivacyPage />} />
             <Route path="/legal/payment" element={<PaymentPage />} />
+            <Route path="/seo" element={<SeoHubPage />} />
+            <Route path="/resheniya" element={<SeoSolutionsHubPage />} />
+            <Route path="/otrasli" element={<SeoIndustriesHubPage />} />
+            <Route path="/blog" element={<BlogIndexPage />} />
+            <Route path="/blog/:slug" element={<BlogArticlePage />} />
+            <Route path="/baza-znaniy" element={<BlogIndexPage knowledge />} />
+            <Route path="/press" element={<PressPage mode="press" />} />
+            <Route path="/partners" element={<PressPage mode="partners" />} />
+            <Route path="/partner/register" element={<PartnerRegister />} />
+            <Route path="/partner/login" element={<PartnerLogin />} />
+            <Route
+              path="/partner/dashboard"
+              element={
+                <PartnerProtectedRoute>
+                  <PartnerDashboard />
+                </PartnerProtectedRoute>
+              }
+            />
+            <Route path="/alternativa-yclients" element={<AlternativeLandingPage />} />
+            <Route path="/alternativa-dikidi" element={<AlternativeLandingPage />} />
+            <Route path="/alternativa-altegio" element={<AlternativeLandingPage />} />
+            <Route path="/alternativa-altelgio" element={<AlternativeLandingPage />} />
+            <Route path="/:seoSlug" element={<ProgrammaticSeoPage />} />
             <Route
               path="/dashboard"
               element={

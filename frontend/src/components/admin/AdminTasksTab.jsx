@@ -283,7 +283,8 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('file', file, file.name);
+      fd.append('originalName', file.name);
       const res = await adminApi.post(`/tasks/${taskId}/attachments/upload`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });

@@ -45,11 +45,11 @@ function normalizeMaxBotUsername(raw) {
   return s || null;
 }
 
-function buildMasterLinks(masterId) {
-  const encoded = encodeMasterId(masterId);
+function buildMasterLinks(masterId, { publicSlug } = {}) {
+  const segment = publicSlug || encodeMasterId(masterId);
   const base = getPublicUrl();
-  const clientUrl = `${base}/m/${encoded}`;
-  const botPayload = `ref_${encoded}`;
+  const clientUrl = `${base}/m/${segment}`;
+  const botPayload = `ref_${encodeMasterId(masterId)}`;
 
   const telegramUsername = process.env.TELEGRAM_BOT_USERNAME;
   const maxBotUsername = normalizeMaxBotUsername(process.env.MAX_BOT_USERNAME);
@@ -75,7 +75,7 @@ function buildMasterLinks(masterId) {
     }
   };
 
-  return { encodedMasterId: encoded, clientUrl, links };
+  return { encodedMasterId: encodeMasterId(masterId), publicSlug: publicSlug || null, clientUrl, links };
 }
 
 module.exports = {

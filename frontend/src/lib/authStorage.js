@@ -54,9 +54,10 @@ export function formatAuthError(err) {
   if (err.response.data?.errors?.length) {
     const first = err.response.data.errors[0];
     if (first?.param === 'email') return 'Введите корректный email';
-    if (first?.param === 'password') return 'Введите пароль';
-    return first?.msg || 'Проверьте email и пароль';
+    if (first?.param === 'code') return 'Введите код из письма';
+    return first?.msg || 'Проверьте введённые данные';
   }
-  if (err.response.status === 401) return 'Неверный email или пароль';
+  if (err.response.status === 401) return 'Неверный код или email';
+  if (err.response.status === 404) return err.response.data?.error || 'Аккаунт не найден';
   return 'Не удалось войти. Попробуйте ещё раз.';
 }

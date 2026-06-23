@@ -14,8 +14,8 @@ export default function LegalPageLayout({ title, children }) {
         }
       />
 
-      <main className={`flex-1 px-4 py-10 lg:px-8 lg:py-14 ${SITE_HEADER_OFFSET}`}>
-        <article className="mx-auto max-w-3xl rounded-3xl border border-slate-100 bg-white p-6 shadow-sm sm:p-10 lg:p-12">
+      <main className={`flex-1 ${SITE_HEADER_OFFSET} px-4 pb-10 lg:px-8 lg:pb-14`}>
+        <article className="mx-auto max-w-3xl rounded-3xl border border-slate-100 bg-white p-6 shadow-sm sm:p-10 lg:p-12 mt-2 sm:mt-4">
           <h1 className="text-2xl font-black text-slate-900 sm:text-3xl">{title}</h1>
           <div className="prose-legal mt-8 space-y-5 text-sm leading-relaxed text-slate-600 sm:text-base">
             {children}

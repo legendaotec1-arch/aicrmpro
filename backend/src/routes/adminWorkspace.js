@@ -11,6 +11,8 @@ const {
   displayNameForEmail,
   getPreviewKind,
   sanitizeFileName,
+  resolveUploadOriginalName,
+  contentDispositionFilename,
   AD_STATUSES,
   AD_PLATFORMS,
   AD_PRIORITIES,
@@ -271,11 +273,13 @@ router.post('/tasks/:id/attachments/upload', upload.single('file'), async (req, 
     const task = await db.query('SELECT id FROM admin_tasks WHERE id = $1', [req.params.id]);
     if (!task.rows[0]) return res.status(404).json({ error: 'Задача не найдена' });
 
+    const originalName = resolveUploadOriginalName(req);
+
     const fileRes = await db.query(
       `INSERT INTO admin_files (folder_id, original_name, stored_name, mime_type, size_bytes, uploaded_by)
        VALUES (NULL, $1, $2, $3, $4, $5) RETURNING *`,
       [
-        req.file.originalname,
+        originalName,
         req.file.filename,
         req.file.mimetype,
         req.file.size,
@@ -399,12 +403,14 @@ router.post('/files', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Файл не выбран' });
     const folderId = req.body?.folderId || null;
 
+    const originalName = resolveUploadOriginalName(req);
+
     const result = await db.query(
       `INSERT INTO admin_files (folder_id, original_name, stored_name, mime_type, size_bytes, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
       [
         folderId || null,
-        req.file.originalname,
+        originalName,
         req.file.filename,
         req.file.mimetype,
         req.file.size,
@@ -436,10 +442,7 @@ router.get('/files/:id/preview', async (req, res) => {
     const mime = row.mime_type || 'application/octet-stream';
     res.setHeader('Content-Type', mime);
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename*=UTF-8''${encodeURIComponent(row.original_name)}`
-    );
+    res.setHeader('Content-Disposition', contentDispositionFilename(row.original_name, 'inline'));
     res.sendFile(filePath);
   } catch (err) {
     console.error('Admin file preview:', err);
@@ -482,7 +485,8 @@ router.get('/files/:id/download', async (req, res) => {
     const filePath = path.join(ensureAdminWorkspaceDir(), row.stored_name);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Файл на диске не найден' });
 
-    res.download(filePath, row.original_name);
+    res.setHeader('Content-Disposition', contentDispositionFilename(row.original_name, 'attachment'));
+    res.sendFile(filePath);
   } catch (err) {
     console.error('Admin file download:', err);
     res.status(500).json({ error: 'Не удалось скачать файл' });
@@ -910,6 +914,333 @@ router.delete('/ads/:id', async (req, res) => {
   } catch (err) {
     console.error('Admin ads delete:', err);
     res.status(500).json({ error: 'Не удалось удалить' });
+  }
+});
+
+// ——— Партнёрская программа ———
+const { uploadsDir } = require('../config/paths');
+const { ensurePartnerSchema, maskCardNumber, MAX_PARTNER_POST_TEMPLATES } = require('../utils/partnerProgram');
+
+const partnerAssetsDir = path.join(uploadsDir, 'partner-assets');
+if (!fs.existsSync(partnerAssetsDir)) {
+  fs.mkdirSync(partnerAssetsDir, { recursive: true });
+}
+
+const partnerAssetUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, partnerAssetsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '');
+      cb(null, `${uuidv4()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+router.get('/partners/summary', async (_req, res) => {
+  try {
+    await ensurePartnerSchema();
+    const result = await db.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM partners WHERE is_active = TRUE) AS partners_count,
+        (SELECT COALESCE(SUM(balance), 0)::numeric FROM partners WHERE is_active = TRUE) AS total_balance,
+        (SELECT COALESCE(SUM(total_earned), 0)::numeric FROM partners) AS total_earned,
+        (SELECT COUNT(*)::int FROM partner_withdrawals WHERE status = 'pending') AS pending_withdrawals,
+        (SELECT COALESCE(SUM(amount), 0)::numeric FROM partner_withdrawals WHERE status = 'pending') AS pending_amount,
+        (SELECT COUNT(*)::int FROM masters WHERE referred_by_partner_id IS NOT NULL) AS referred_masters
+    `);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Admin partners summary:', err);
+    res.status(500).json({ error: 'Ошибка загрузки сводки' });
+  }
+});
+
+router.get('/partners', async (_req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT p.*,
+        (SELECT COUNT(*)::int FROM masters m WHERE m.referred_by_partner_id = p.id) AS referrals_count
+      FROM partners p
+      ORDER BY p.created_at DESC
+      LIMIT 200
+    `);
+    res.json({
+      partners: result.rows.map((r) => ({
+        id: r.id,
+        email: r.email,
+        full_name: r.full_name,
+        referral_code: r.referral_code,
+        balance: Number(r.balance),
+        total_earned: Number(r.total_earned),
+        referrals_count: r.referrals_count,
+        email_verified: r.email_verified,
+        is_active: r.is_active,
+        created_at: r.created_at,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка загрузки партнёров' });
+  }
+});
+
+router.get('/partners/withdrawals', async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const result = await db.query(
+      `SELECT w.*, p.email AS partner_email, p.full_name AS partner_account_name
+       FROM partner_withdrawals w
+       JOIN partners p ON p.id = w.partner_id
+       WHERE ($1 = 'all' OR w.status = $1)
+       ORDER BY w.created_at DESC LIMIT 100`,
+      [status]
+    );
+    res.json({
+      withdrawals: result.rows.map((r) => ({
+        ...r,
+        amount: Number(r.amount),
+        card_masked: maskCardNumber(r.card_number),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка загрузки заявок' });
+  }
+});
+
+router.post('/partners/withdrawals/:id/complete', async (req, res) => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const wRes = await client.query(
+      `SELECT w.*, p.full_name AS partner_name, p.email AS partner_email
+       FROM partner_withdrawals w JOIN partners p ON p.id = w.partner_id
+       WHERE w.id = $1 FOR UPDATE`,
+      [req.params.id]
+    );
+    const w = wRes.rows[0];
+    if (!w) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Заявка не найдена' });
+    }
+    if (w.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Заявка уже обработана' });
+    }
+
+    const reason = `Выплата партнёру ${w.partner_name} (${w.partner_email}) — вывод #${w.id.slice(0, 8)} · ${w.full_name} · ${maskCardNumber(w.card_number)} · ${w.bank_name}`;
+    const adminW = await client.query(
+      `INSERT INTO admin_withdrawals (amount, reason, created_by) VALUES ($1, $2, $3) RETURNING id`,
+      [Number(w.amount), reason, req.adminEmail]
+    );
+
+    await client.query(
+      `UPDATE partner_withdrawals SET status = 'completed', processed_at = NOW(),
+       processed_by = $2, admin_withdrawal_id = $3, admin_note = $4
+       WHERE id = $1`,
+      [w.id, req.adminEmail, adminW.rows[0].id, req.body?.note || null]
+    );
+
+    await client.query('COMMIT');
+    res.json({ ok: true, admin_withdrawal_id: adminW.rows[0].id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Partner withdrawal complete:', err);
+    res.status(500).json({ error: 'Ошибка обработки' });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/partners/withdrawals/:id/reject', async (req, res) => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const wRes = await client.query(
+      `SELECT * FROM partner_withdrawals WHERE id = $1 FOR UPDATE`,
+      [req.params.id]
+    );
+    const w = wRes.rows[0];
+    if (!w || w.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Заявка не найдена или уже обработана' });
+    }
+
+    await client.query(
+      `UPDATE partners SET balance = balance + $1, updated_at = NOW() WHERE id = $2`,
+      [Number(w.amount), w.partner_id]
+    );
+    await client.query(
+      `UPDATE partner_withdrawals SET status = 'rejected', processed_at = NOW(),
+       processed_by = $2, admin_note = $3 WHERE id = $1`,
+      [w.id, req.adminEmail, req.body?.note || 'Отклонено']
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Ошибка отклонения' });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/partners/assets', async (_req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT * FROM partner_assets ORDER BY sort_order, created_at DESC`
+    );
+    res.json({ assets: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка загрузки материалов' });
+  }
+});
+
+router.post('/partners/assets', partnerAssetUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Файл не передан' });
+    const { title, description, file_type, sort_order } = req.body || {};
+    if (!title?.trim()) return res.status(400).json({ error: 'Укажите название' });
+
+    const id = uuidv4();
+    const result = await db.query(
+      `INSERT INTO partner_assets (id, title, description, file_type, file_path, file_name, mime_type, size_bytes, sort_order, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [
+        id,
+        title.trim(),
+        description || null,
+        file_type || 'other',
+        req.file.path,
+        req.file.originalname,
+        req.file.mimetype,
+        req.file.size,
+        Number(sort_order) || 0,
+        req.adminEmail,
+      ]
+    );
+    res.status(201).json({ asset: result.rows[0] });
+  } catch (err) {
+    console.error('Partner asset upload:', err);
+    res.status(500).json({ error: 'Ошибка загрузки' });
+  }
+});
+
+router.delete('/partners/assets/:id', async (req, res) => {
+  try {
+    const result = await db.query(
+      `UPDATE partner_assets SET is_active = FALSE WHERE id = $1 RETURNING id`,
+      [req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Не найдено' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка удаления' });
+  }
+});
+
+router.get('/partners/post-templates', async (_req, res) => {
+  try {
+    await ensurePartnerSchema();
+    const result = await db.query(
+      `SELECT id, title, body, sort_order, is_active, created_at, updated_at
+       FROM partner_post_templates
+       ORDER BY sort_order ASC, created_at ASC`
+    );
+    res.json({
+      templates: result.rows,
+      max: MAX_PARTNER_POST_TEMPLATES,
+      activeCount: result.rows.filter((r) => r.is_active).length,
+    });
+  } catch (err) {
+    console.error('Partner post templates list:', err);
+    res.status(500).json({ error: 'Ошибка загрузки постов' });
+  }
+});
+
+router.post('/partners/post-templates', async (req, res) => {
+  try {
+    await ensurePartnerSchema();
+    const { title, body, sort_order } = req.body || {};
+    if (!title?.trim()) return res.status(400).json({ error: 'Укажите название поста' });
+    if (!body?.trim()) return res.status(400).json({ error: 'Укажите текст поста' });
+
+    const countRes = await db.query(
+      `SELECT COUNT(*)::int AS c FROM partner_post_templates WHERE is_active = TRUE`
+    );
+    if (countRes.rows[0].c >= MAX_PARTNER_POST_TEMPLATES) {
+      return res.status(400).json({ error: `Максимум ${MAX_PARTNER_POST_TEMPLATES} активных постов` });
+    }
+
+    const id = uuidv4();
+    const result = await db.query(
+      `INSERT INTO partner_post_templates (id, title, body, sort_order, created_by)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [id, title.trim(), body.trim(), Number(sort_order) || 0, req.adminEmail]
+    );
+    res.status(201).json({ template: result.rows[0] });
+  } catch (err) {
+    console.error('Partner post template create:', err);
+    res.status(500).json({ error: 'Ошибка сохранения поста' });
+  }
+});
+
+router.put('/partners/post-templates/:id', async (req, res) => {
+  try {
+    await ensurePartnerSchema();
+    const { title, body, sort_order, is_active } = req.body || {};
+    const current = await db.query(
+      `SELECT * FROM partner_post_templates WHERE id = $1`,
+      [req.params.id]
+    );
+    const row = current.rows[0];
+    if (!row) return res.status(404).json({ error: 'Пост не найден' });
+
+    const nextActive = is_active !== undefined ? Boolean(is_active) : row.is_active;
+    if (nextActive && !row.is_active) {
+      const countRes = await db.query(
+        `SELECT COUNT(*)::int AS c FROM partner_post_templates WHERE is_active = TRUE`
+      );
+      if (countRes.rows[0].c >= MAX_PARTNER_POST_TEMPLATES) {
+        return res.status(400).json({ error: `Максимум ${MAX_PARTNER_POST_TEMPLATES} активных постов` });
+      }
+    }
+
+    const result = await db.query(
+      `UPDATE partner_post_templates SET
+         title = COALESCE($2, title),
+         body = COALESCE($3, body),
+         sort_order = COALESCE($4, sort_order),
+         is_active = COALESCE($5, is_active),
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        req.params.id,
+        title?.trim() || null,
+        body?.trim() || null,
+        sort_order !== undefined ? Number(sort_order) : null,
+        is_active !== undefined ? nextActive : null,
+      ]
+    );
+    res.json({ template: result.rows[0] });
+  } catch (err) {
+    console.error('Partner post template update:', err);
+    res.status(500).json({ error: 'Ошибка обновления поста' });
+  }
+});
+
+router.delete('/partners/post-templates/:id', async (req, res) => {
+  try {
+    await ensurePartnerSchema();
+    const result = await db.query(
+      `UPDATE partner_post_templates SET is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id`,
+      [req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Пост не найден' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка удаления поста' });
   }
 });
 

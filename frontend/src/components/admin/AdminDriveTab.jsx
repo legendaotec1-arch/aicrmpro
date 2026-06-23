@@ -215,7 +215,8 @@ export default function AdminDriveTab() {
       const uploaded = [];
       for (const file of picked) {
         const fd = new FormData();
-        fd.append('file', file);
+        fd.append('file', file, file.name);
+        fd.append('originalName', file.name);
         if (folderId) fd.append('folderId', folderId);
         const res = await adminApi.post('/files', fd, {
           headers: { 'Content-Type': 'multipart/form-data' },

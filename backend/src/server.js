@@ -6,6 +6,16 @@ const fs = require('fs');
 const { uploadsDir, frontendDist } = require('./config/paths');
 const { setStaticCacheHeaders, sendSpaIndex } = require('./utils/staticCache');
 const { readAppAssets } = require('./utils/appAssets');
+const { seedSeoContent } = require('./seo/seed');
+const {
+  router: seoApiRouter,
+  buildRobotsTxt,
+  buildSitemapIndexXml,
+  collectSitemapUrls,
+  buildUrlSet,
+} = require('./routes/seo');
+const { sendSpaIndexWithSeo } = require('./seo/spaSeo');
+const { registerIndexNowKeyRoute } = require('./seo/indexNow');
 
 // Load environment variables
 dotenv.config();
@@ -64,6 +74,76 @@ const clientRoutes = require('./routes/client');
 const appointmentRoutes = require('./routes/appointment');
 const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
+const partnerRoutes = require('./routes/partner');
+
+// SEO seed on startup
+async function initSeo() {
+  try {
+    const { backfillMasterSlugs } = require('./seo/masterSeo');
+    const slugs = await backfillMasterSlugs();
+    if (slugs > 0) {
+      console.log(`[seo] Backfilled ${slugs} master public slugs`);
+    }
+  } catch (err) {
+    console.error('[seo] Master slug backfill failed:', err.message);
+  }
+
+  try {
+    const result = await seedSeoContent();
+    if (result.seeded) {
+      const pub = result.publication?.rescheduled
+        ? `, расписание: ${result.publication.rescheduled} статей (2/день)`
+        : '';
+      const live = result.articlesLive != null ? `, live ${result.articlesLive}` : '';
+      const queued = result.articlesScheduled != null ? `, в очереди ${result.articlesScheduled}` : '';
+      const added = result.articlesAdded > 0 ? ` (+${result.articlesAdded} новых)` : '';
+      console.log(
+        `[seo] ${result.pages} pages, ${result.articles} articles${added}${live}${queued}${pub}`
+      );
+    }
+  } catch (err) {
+    console.error('[seo] Seed failed:', err.message);
+  }
+
+  try {
+    const { startArticleCron } = require('./seo/articleCron');
+    startArticleCron();
+  } catch (err) {
+    console.error('[seo] Article cron failed:', err.message);
+  }
+
+  try {
+    const { seedExternalLinks } = require('./seo/externalLinks');
+    const ext = await seedExternalLinks();
+    if (ext.inserted > 0) {
+      console.log(`[seo] External links catalog: +${ext.inserted} targets (${ext.catalog} total)`);
+    }
+  } catch (err) {
+    console.error('[seo] External links seed failed:', err.message);
+  }
+
+  try {
+    const db = require('./config/database');
+    const { runSeoIntelligence } = require('./seo/seoIntelligence');
+    const intel = await runSeoIntelligence(db, { generatePages: true });
+    const pg = intel.pagesGenerated?.generated || 0;
+    console.log(
+      `[seo-intel] ${intel.clusters.total} clusters, ${intel.contentGaps.recommendations} рекомендаций, ${intel.contentGaps.zeroImpressions} стр. без показов${pg ? `, +${pg} посадочных` : ''}`
+    );
+  } catch (err) {
+    console.error('[seo] Intelligence failed:', err.message);
+  }
+
+  try {
+    const { ensurePartnerSchema } = require('./utils/partnerProgram');
+    const { ensureMasterEmailSchema } = require('./utils/masterEmailAuth');
+    await ensurePartnerSchema();
+    await ensureMasterEmailSchema();
+    console.log('[partner] Schema ready');
+  } catch (err) {
+    console.error('[partner] Schema failed:', err.message);
+  }
+}
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -72,6 +152,62 @@ app.use('/api/master', masterRoutes);
 app.use('/api/client', clientRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/partner', partnerRoutes);
+app.use('/api/seo', seoApiRouter);
+
+app.get('/r/:code', (req, res) => {
+  const base = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '');
+  res.redirect(302, `${base}/register?ref=${encodeURIComponent(req.params.code)}`);
+});
+
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send(buildRobotsTxt());
+});
+
+registerIndexNowKeyRoute(app);
+
+app.get('/sitemap.xml', async (_req, res) => {
+  try {
+    const xml = await buildSitemapIndexXml(require('./config/database'));
+    res.type('application/xml').send(xml);
+  } catch (err) {
+    console.error('sitemap index:', err);
+    res.status(500).type('text/plain').send('Sitemap error');
+  }
+});
+
+async function sendSitemapPart(req, res, part) {
+  try {
+    const db = require('./config/database');
+    const { staticUrls, pageUrls, articleUrls, masterUrls } = await collectSitemapUrls(db);
+    const map = {
+      static: staticUrls,
+      pages: pageUrls,
+      blog: articleUrls,
+      masters: masterUrls,
+    };
+    res.type('application/xml').send(buildUrlSet(map[part] || []));
+  } catch (err) {
+    console.error(`sitemap-${part}:`, err);
+    res.status(500).send('Sitemap error');
+  }
+}
+
+app.get('/sitemap-static.xml', (req, res) => sendSitemapPart(req, res, 'static'));
+app.get('/sitemap-pages.xml', (req, res) => sendSitemapPart(req, res, 'pages'));
+app.get('/sitemap-blog.xml', (req, res) => sendSitemapPart(req, res, 'blog'));
+app.get('/sitemap-masters.xml', (req, res) => sendSitemapPart(req, res, 'masters'));
+
+app.get('/blog/feed.xml', async (_req, res) => {
+  try {
+    const { buildBlogRssFeed } = require('./seo/syndicationFeed');
+    const xml = await buildBlogRssFeed(require('./config/database'));
+    res.type('application/rss+xml').send(xml);
+  } catch (err) {
+    console.error('blog feed:', err);
+    res.status(500).type('text/plain').send('Feed error');
+  }
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -110,7 +246,7 @@ app.get('*', (req, res) => {
   if (/\.(js|jsx|mjs|css|map|wasm)$/i.test(req.path)) {
     return res.status(404).type('text/plain').send('Not found');
   }
-  sendSpaIndex(res, path.join(frontendDist, 'index.html'));
+  sendSpaIndexWithSeo(res, path.join(frontendDist, 'index.html'), req.path);
 });
 
 // Error handling middleware
@@ -143,6 +279,7 @@ assertFrontendDist();
 
 app.listen(PORT, async () => {
   await cleanupPastScheduleExceptionsOnStartup();
+  await initSeo();
   console.log(`Сервер запущен на порту ${PORT}`);
 });
 

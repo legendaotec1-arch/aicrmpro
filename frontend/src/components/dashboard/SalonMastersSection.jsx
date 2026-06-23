@@ -18,7 +18,6 @@ const emptyForm = {
   is_active: true,
   photo_url: null,
   email: '',
-  password: '',
   commission_percent: 50
 };
 
@@ -51,7 +50,6 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
         is_active: m.is_active !== false,
         photo_url: m.photo_url,
         email: m.email || '',
-        password: '',
         commission_percent: m.commission_percent ?? 50
       });
     } else {
@@ -86,10 +84,6 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
         toast('Укажите email для входа', 'error');
         return;
       }
-      if (!form.password || form.password.length < 6) {
-        toast('Пароль — минимум 6 символов', 'error');
-        return;
-      }
     }
     setSaving(true);
     try {
@@ -104,7 +98,6 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
         email: form.email.trim(),
         commission_percent: Number(form.commission_percent) || 0
       };
-      if (form.password) payload.password = form.password;
 
       let id = form.id;
       if (id) {
@@ -331,14 +324,7 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 placeholder="master@example.com"
-              />
-              <Input
-                label={isEdit ? 'Новый пароль' : 'Пароль'}
-                type="password"
-                required={!isEdit}
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder={isEdit ? 'Оставьте пустым, если не меняете' : 'Минимум 6 символов'}
+                hint="Мастер входит по коду из письма на этот email"
               />
             </div>
           </FormSection>

@@ -273,6 +273,25 @@ async function applyTopup(masterId, amount, yookassaPaymentId) {
       [yookassaPaymentId]
     );
 
+    const paymentRow = await client.query(
+      `SELECT id FROM billing_payments WHERE yookassa_payment_id = $1 LIMIT 1`,
+      [yookassaPaymentId]
+    );
+    const billingPaymentId = paymentRow.rows[0]?.id || null;
+
+    try {
+      const { creditPartnerCommission } = require('./partnerProgram');
+      await creditPartnerCommission(client, {
+        masterId,
+        paymentAmount: amount,
+        paymentType: 'topup',
+        billingPaymentId,
+        description: `Комиссия с пополнения ${amount} ₽`,
+      });
+    } catch (commErr) {
+      console.error('Partner commission (topup):', commErr.message);
+    }
+
     const updatedRow = { ...row, balance: balanceAfter };
     await checkAndSendBalanceAlerts(updatedRow, client);
 
@@ -338,6 +357,24 @@ async function applyUnlimitedPurchase(masterId, yookassaPaymentId) {
       `UPDATE billing_payments SET status = 'succeeded' WHERE yookassa_payment_id = $1`,
       [yookassaPaymentId]
     );
+
+    const paymentRow = await client.query(
+      `SELECT id FROM billing_payments WHERE yookassa_payment_id = $1 LIMIT 1`,
+      [yookassaPaymentId]
+    );
+
+    try {
+      const { creditPartnerCommission } = require('./partnerProgram');
+      await creditPartnerCommission(client, {
+        masterId,
+        paymentAmount: UNLIMITED_PRICE,
+        paymentType: 'unlimited',
+        billingPaymentId: paymentRow.rows[0]?.id || null,
+        description: `Комиссия с тарифа «Безлимит» (${UNLIMITED_PRICE} ₽)`,
+      });
+    } catch (commErr) {
+      console.error('Partner commission (unlimited):', commErr.message);
+    }
 
     await client.query('COMMIT');
     return { tariff_expires_at: expiresAt.toISOString() };

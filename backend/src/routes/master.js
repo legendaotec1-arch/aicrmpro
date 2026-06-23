@@ -18,6 +18,7 @@ const {
   getSalonMasterById,
   getPriceGroupsForSalon
 } = require('../utils/salonMasters');
+const { randomPasswordHash } = require('../utils/masterEmailAuth');
 const { resolveTeamMasterId } = require('../utils/teamContext');
 const { getAvailableSlots } = require('../utils/bookingSlots');
 const { masterAuthMiddleware: authMiddleware, requireOwner } = require('../utils/masterAuth');
@@ -31,6 +32,8 @@ const { buildStats } = require('../utils/clientStats');
 const { fetchClientsExportRows, buildClientsCsv } = require('../utils/clientsExport');
 const { formatClientDisplayName } = require('../utils/clientDisplay');
 const { formatMasterPublicTitle } = require('../utils/masterDisplay');
+const { assignUniqueSlug, resolveMasterIdFromParam, buildMasterMeta } = require('../seo/masterSeo');
+const { extractCityFromAddress } = require('../utils/slugify');
 const { buildSocialLinksFromRow, pickSocialPayload } = require('../utils/socialLinks');
 const { upsertScheduleException, cleanupPastScheduleExceptions, salonTodayDateStr } = require('../utils/scheduleExceptions');
 const { listRussianTimezones, getTimezoneLabel, normalizeTimezone } = require('../utils/salonTime');
@@ -167,9 +170,6 @@ router.post('/me/salon-masters', authMiddleware, requireOwner, async (req, res) 
     if (!email?.trim()) {
       return res.status(400).json({ error: 'Укажите email для входа мастера' });
     }
-    if (!password || String(password).length < 6) {
-      return res.status(400).json({ error: 'Пароль для мастера — минимум 6 символов' });
-    }
 
     const emailNorm = email.trim().toLowerCase();
     const dupOwner = await db.query('SELECT id FROM masters WHERE LOWER(email) = $1', [emailNorm]);
@@ -184,7 +184,9 @@ router.post('/me/salon-masters', authMiddleware, requireOwner, async (req, res) 
       return res.status(400).json({ error: 'Этот email уже используется другим мастером' });
     }
 
-    const password_hash = await bcrypt.hash(String(password), 10);
+    const password_hash = password && String(password).length >= 6
+      ? await bcrypt.hash(String(password), 10)
+      : await randomPasswordHash();
     const pct = Math.min(100, Math.max(0, Number(commission_percent) || 0));
     const id = uuidv4();
     await db.query(
@@ -360,7 +362,7 @@ router.delete('/me/salon-masters/:id/permanent', authMiddleware, requireOwner, a
 // Получить данные мастера (публичные)
 router.get('/:masterId', async (req, res) => {
   try {
-    const masterId = resolveMasterId(req.params.masterId);
+    const masterId = await resolveMasterIdFromParam(req.params.masterId);
     if (!isResolvedMasterId(masterId)) {
       return res.status(404).json({ error: 'Мастер не найден' });
     }
@@ -370,10 +372,12 @@ router.get('/:masterId', async (req, res) => {
       `SELECT id, name, last_name, salon_name, logo_url, description, phone, address,
               latitude, longitude, yandex_maps_link, client_theme, timezone,
               social_telegram, social_instagram, social_vk, social_website, social_max,
-              video_reel_url
+              video_reel_url, public_slug, city, public_indexable
        FROM masters WHERE id = $1`,
-      `SELECT id, name, salon_name, logo_url, description, phone, address,
-              latitude, longitude, yandex_maps_link
+      `SELECT id, name, last_name, salon_name, logo_url, description, phone, address,
+              latitude, longitude, yandex_maps_link, client_theme, timezone,
+              social_telegram, social_instagram, social_vk, social_website, social_max,
+              video_reel_url
        FROM masters WHERE id = $1`,
       [masterId]
     );
@@ -421,6 +425,7 @@ router.get('/:masterId', async (req, res) => {
     );
 
     const masterRow = sanitizeMasterMediaRow(master.rows[0]);
+    const publicSlug = masterRow.public_slug || await assignUniqueSlug(db, masterRow);
     const salonTimezone = normalizeTimezone(masterRow.timezone);
     const socialLinks = buildSocialLinksFromRow(masterRow);
     let billingState = null;
@@ -444,6 +449,13 @@ router.get('/:masterId', async (req, res) => {
       social_max: _sm,
       ...masterPublic
     } = masterRow;
+    const reviewSummary = {
+      count: reviewStats.rows[0]?.count || 0,
+      average: Number(reviewStats.rows[0]?.average) || null
+    };
+    const seoMeta = buildMasterMeta(masterRow, { services: priceList, reviewSummary });
+    const { clientUrl } = buildMasterLinks(masterId, { publicSlug });
+
     res.json({
       master: {
         ...masterPublic,
@@ -451,16 +463,22 @@ router.get('/:masterId', async (req, res) => {
         timezoneLabel: getTimezoneLabel(salonTimezone),
         socialLinks,
         client_theme: normalizeClientTheme(masterRow.client_theme),
-        display_title: formatMasterPublicTitle(masterRow)
+        display_title: formatMasterPublicTitle(masterRow),
+        public_slug: publicSlug,
+        city: masterRow.city || extractCityFromAddress(masterRow.address),
+        canonical_url: clientUrl,
+      },
+      seo: {
+        title: seoMeta.title,
+        description: seoMeta.description,
+        canonical: clientUrl,
+        indexable: masterRow.public_indexable !== false,
       },
       teamMasters,
       priceGroups,
       portfolio: portfolio.rows.map(sanitizePortfolioRow),
       priceList,
-      reviewSummary: {
-        count: reviewStats.rows[0]?.count || 0,
-        average: Number(reviewStats.rows[0]?.average) || null
-      },
+      reviewSummary,
       reviews: recentReviews.rows,
       booking: {
         timezone: salonTimezone,
@@ -658,11 +676,20 @@ router.put('/me/profile', authMiddleware, requireOwner, async (req, res) => {
     }
 
     const updated = await db.query(
-      `SELECT address, latitude, longitude, yandex_maps_link, timezone FROM masters WHERE id = $1`,
+      `SELECT address, latitude, longitude, yandex_maps_link, timezone, name, last_name, salon_name, public_slug
+       FROM masters WHERE id = $1`,
       [req.masterId]
     );
+    const row = updated.rows[0];
+    if (row) {
+      await assignUniqueSlug(db, {
+        ...row,
+        id: req.masterId,
+        address: row.address,
+      });
+    }
 
-    res.json({ success: true, ...updated.rows[0], timezoneLabel: getTimezoneLabel(updated.rows[0]?.timezone) });
+    res.json({ success: true, ...row, timezoneLabel: getTimezoneLabel(row?.timezone) });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при обновлении профиля' });
   }
@@ -1817,12 +1844,18 @@ router.get('/me/analytics-export', authMiddleware, requireOwner, async (req, res
 // Ссылки для MAX и Telegram (единая база записей)
 router.get('/me/link', authMiddleware, async (req, res) => {
   try {
-    const master = await db.query('SELECT id FROM masters WHERE id = $1', [req.masterId]);
+    const master = await db.query(
+      `SELECT id, name, last_name, salon_name, address, city, public_slug
+       FROM masters WHERE id = $1`,
+      [req.masterId]
+    );
     if (master.rows.length === 0) {
       return res.status(404).json({ error: 'Мастер не найден' });
     }
 
-    const { links, encodedMasterId, clientUrl } = buildMasterLinks(req.masterId);
+    const row = master.rows[0];
+    const publicSlug = row.public_slug || await assignUniqueSlug(db, row);
+    const { links, encodedMasterId, clientUrl } = buildMasterLinks(req.masterId, { publicSlug });
     res.json({
       link: clientUrl,
       links,
