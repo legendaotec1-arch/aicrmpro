@@ -1,25 +1,39 @@
-import { useState, useContext } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AuthContext } from '../App';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AuthLayout from '../components/layout/AuthLayout';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import adminApi from '../lib/adminApi';
+import { saveAdminToken, getAdminToken } from '../lib/adminStorage';
 import { formatAuthError } from '../lib/authStorage';
 
-export default function MasterLogin() {
+export default function AdminLogin() {
   const navigate = useNavigate();
-  const { login } = useContext(AuthContext);
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const token = getAdminToken();
+    if (!token) return;
+    adminApi.get('/verify')
+      .then((res) => {
+        if (res.data?.valid) navigate('/admin/dashboard', { replace: true });
+      })
+      .catch(() => {});
+  }, [navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await login(formData.email, formData.password);
-      navigate('/dashboard');
+      const res = await adminApi.post('/login', {
+        email: String(formData.email || '').trim().toLowerCase(),
+        password: String(formData.password || '').trim(),
+      });
+      saveAdminToken(res.data.token);
+      navigate('/admin/dashboard', { replace: true });
     } catch (err) {
       setError(formatAuthError(err));
     } finally {
@@ -28,45 +42,33 @@ export default function MasterLogin() {
   };
 
   return (
-    <AuthLayout title="С возвращением" subtitle="Войдите в кабинет мастера">
+    <AuthLayout title="Админка Woner" subtitle="Вход для владельца платформы">
       {error && (
-        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
       )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
           label="Email"
           type="email"
           required
-          autoComplete="email"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          inputMode="email"
+          autoComplete="username"
           value={formData.email}
           onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-          placeholder="you@salon.ru"
         />
         <Input
           label="Пароль"
           type="password"
           required
           autoComplete="current-password"
-          autoCapitalize="none"
-          autoCorrect="off"
           value={formData.password}
           onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-          placeholder="••••••••"
         />
         <Button type="submit" className="w-full" size="lg" loading={loading}>
           Войти
         </Button>
       </form>
-      <p className="mt-6 text-center text-sm text-ink-secondary">
-        Нет аккаунта?{' '}
-        <Link to="/register" className="font-semibold text-primary hover:text-primary-hover">
-          Зарегистрироваться
-        </Link>
-      </p>
     </AuthLayout>
   );
 }

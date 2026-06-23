@@ -36,8 +36,8 @@ function teamPayload(row) {
 
 // Регистрация владельца салона
 router.post('/register', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }),
+  body('email').trim().isEmail().normalizeEmail({ gmail_remove_dots: false }),
+  body('password').trim().isLength({ min: 6 }),
   body('name').trim().notEmpty()
 ], async (req, res) => {
   try {
@@ -88,13 +88,16 @@ router.post('/register', [
 
 // Вход: владелец салона или мастер команды
 router.post('/login', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty()
+  body('email').trim().isEmail().normalizeEmail({ gmail_remove_dots: false }),
+  body('password').trim().notEmpty()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({
+        error: 'Проверьте email и пароль',
+        errors: errors.array()
+      });
     }
 
     const { email, password } = req.body;

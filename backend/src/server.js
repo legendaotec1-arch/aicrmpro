@@ -4,6 +4,8 @@ const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 const { uploadsDir, frontendDist } = require('./config/paths');
+const { setStaticCacheHeaders, sendSpaIndex } = require('./utils/staticCache');
+const { readAppAssets } = require('./utils/appAssets');
 
 // Load environment variables
 dotenv.config();
@@ -47,7 +49,13 @@ app.use('/uploads', (_req, res) => {
 });
 
 // Serve static files from frontend build
-app.use(express.static(frontendDist));
+app.use(
+  express.static(frontendDist, {
+    etag: false,
+    lastModified: false,
+    setHeaders: setStaticCacheHeaders
+  })
+);
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -55,9 +63,11 @@ const masterRoutes = require('./routes/master');
 const clientRoutes = require('./routes/client');
 const appointmentRoutes = require('./routes/appointment');
 const billingRoutes = require('./routes/billing');
+const adminRoutes = require('./routes/admin');
 
 // Use routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/master', masterRoutes);
 app.use('/api/client', clientRoutes);
 app.use('/api/appointments', appointmentRoutes);
@@ -69,6 +79,16 @@ app.get('/api/health', (req, res) => {
 });
 
 // Публичные настройки для фронтенда (ключ карт — ограничьте по HTTP Referer в кабинете Яндекса)
+app.get('/api/app-assets', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  try {
+    res.json(readAppAssets());
+  } catch (err) {
+    res.status(500).json({ error: 'app_assets_unavailable' });
+  }
+});
+
 app.get('/api/config/public', (req, res) => {
   const billingEnabled = (process.env.BILLING_ENABLED || '').trim().toLowerCase();
   res.json({
@@ -78,9 +98,19 @@ app.get('/api/config/public', (req, res) => {
   });
 });
 
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
+
 // Serve frontend for all other routes (SPA)
 app.get('*', (req, res) => {
-  res.sendFile(path.join(frontendDist, 'index.html'));
+  if (req.path.startsWith('/assets/') || req.path.startsWith('/src/')) {
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  if (/\.(js|jsx|mjs|css|map|wasm)$/i.test(req.path)) {
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  sendSpaIndex(res, path.join(frontendDist, 'index.html'));
 });
 
 // Error handling middleware

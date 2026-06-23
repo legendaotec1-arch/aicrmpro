@@ -2,7 +2,24 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'strip-crossorigin',
+      transformIndexHtml(html) {
+        return html.replace(/ crossorigin/g, '');
+      },
+    },
+    {
+      name: 'strip-dev-entry-tag',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html) {
+          return html.replace(/\s*<script type="module" src="\/src\/main\.jsx"[^>]*><\/script>/g, '');
+        },
+      },
+    },
+  ],
   server: {
     port: 5173,
     proxy: {
@@ -12,6 +29,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    base: '/'
+    base: '/',
+    target: 'safari14',
+    modulePreload: false,
   }
 })

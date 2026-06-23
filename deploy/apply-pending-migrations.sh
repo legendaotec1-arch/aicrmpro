@@ -117,6 +117,118 @@ WHERE notes IS NOT NULL AND TRIM(notes) != '' AND (note_1 IS NULL OR TRIM(note_1
 
 ALTER TABLE masters ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) NOT NULL DEFAULT 'Europe/Moscow';
 UPDATE masters SET timezone = 'Europe/Moscow' WHERE timezone IS NULL OR TRIM(timezone) = '';
+
+CREATE TABLE IF NOT EXISTS admin_tasks (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title VARCHAR(500) NOT NULL,
+  description TEXT,
+  status VARCHAR(30) NOT NULL DEFAULT 'todo',
+  assignee_email VARCHAR(255),
+  created_by VARCHAR(255) NOT NULL,
+  priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE admin_tasks DROP CONSTRAINT IF EXISTS admin_tasks_status_check;
+ALTER TABLE admin_tasks ADD CONSTRAINT admin_tasks_status_check
+  CHECK (status IN ('todo', 'in_progress', 'review', 'done'));
+ALTER TABLE admin_tasks DROP CONSTRAINT IF EXISTS admin_tasks_priority_check;
+ALTER TABLE admin_tasks ADD CONSTRAINT admin_tasks_priority_check
+  CHECK (priority IN ('low', 'normal', 'high'));
+
+CREATE TABLE IF NOT EXISTS admin_folders (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(255) NOT NULL,
+  parent_id UUID REFERENCES admin_folders(id) ON DELETE CASCADE,
+  created_by VARCHAR(255) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_folders_parent ON admin_folders(parent_id);
+
+CREATE TABLE IF NOT EXISTS admin_files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  folder_id UUID REFERENCES admin_folders(id) ON DELETE CASCADE,
+  original_name VARCHAR(500) NOT NULL,
+  stored_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(255),
+  size_bytes BIGINT NOT NULL DEFAULT 0,
+  uploaded_by VARCHAR(255) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_files_folder ON admin_files(folder_id);
+
+CREATE TABLE IF NOT EXISTS admin_withdrawals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+  reason TEXT NOT NULL,
+  created_by VARCHAR(255) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_withdrawals_created ON admin_withdrawals(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_vault_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title VARCHAR(255) NOT NULL,
+  url TEXT,
+  login VARCHAR(500),
+  password TEXT,
+  created_by VARCHAR(255) NOT NULL,
+  updated_by VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_vault_created ON admin_vault_entries(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_ad_leads (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title VARCHAR(255) NOT NULL,
+  platform VARCHAR(30) NOT NULL DEFAULT 'other',
+  channel_url TEXT,
+  contact TEXT,
+  audience_size INT,
+  quoted_price DECIMAL(12, 2),
+  allocated_budget DECIMAL(12, 2) NOT NULL DEFAULT 0,
+  status VARCHAR(30) NOT NULL DEFAULT 'new',
+  conditions TEXT,
+  notes TEXT,
+  priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+  created_by VARCHAR(255) NOT NULL,
+  updated_by VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE admin_ad_leads DROP CONSTRAINT IF EXISTS admin_ad_leads_status_check;
+ALTER TABLE admin_ad_leads ADD CONSTRAINT admin_ad_leads_status_check
+  CHECK (status IN ('new', 'contacted', 'negotiating', 'agreed', 'paid', 'rejected', 'done'));
+ALTER TABLE admin_ad_leads DROP CONSTRAINT IF EXISTS admin_ad_leads_platform_check;
+ALTER TABLE admin_ad_leads ADD CONSTRAINT admin_ad_leads_platform_check
+  CHECK (platform IN ('telegram', 'instagram', 'youtube', 'vk', 'tiktok', 'blog', 'other'));
+ALTER TABLE admin_ad_leads DROP CONSTRAINT IF EXISTS admin_ad_leads_priority_check;
+ALTER TABLE admin_ad_leads ADD CONSTRAINT admin_ad_leads_priority_check
+  CHECK (priority IN ('low', 'normal', 'high'));
+ALTER TABLE admin_withdrawals ADD COLUMN IF NOT EXISTS ad_lead_id UUID REFERENCES admin_ad_leads(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_admin_ad_leads_status ON admin_ad_leads(status);
+CREATE INDEX IF NOT EXISTS idx_admin_ad_leads_created ON admin_ad_leads(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_task_comments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  task_id UUID NOT NULL REFERENCES admin_tasks(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_by VARCHAR(255) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_task_comments_task ON admin_task_comments(task_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS admin_task_attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  task_id UUID NOT NULL REFERENCES admin_tasks(id) ON DELETE CASCADE,
+  file_id UUID NOT NULL REFERENCES admin_files(id) ON DELETE CASCADE,
+  attached_by VARCHAR(255) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(task_id, file_id)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_task_attachments_task ON admin_task_attachments(task_id);
 SQL
 
 echo "==> Migrations OK"

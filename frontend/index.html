@@ -2,16 +2,68 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        window.__wonerBootError = function () {
+          var root = document.getElementById('root');
+          if (!root) return;
+          root.innerHTML =
+            '<div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;text-align:center;color:#334155">' +
+            '<p style="font-size:18px;font-weight:600;margin:0 0 8px">Не удалось загрузить сайт</p>' +
+            '<p style="font-size:14px;color:#64748b;margin:0 0 16px">Попробуйте обновить страницу</p>' +
+            '<a href="' + (location.pathname || '/') + '?t=' + Date.now() + '" style="display:inline-block;padding:12px 24px;background:#6A5ACD;color:#fff;border-radius:12px;text-decoration:none;font-weight:600">Обновить</a>' +
+            '</div>';
+        };
+
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            regs.forEach(function (r) { r.unregister(); });
+          }).catch(function () {});
+        }
+        if ('caches' in window) {
+          caches.keys().then(function (keys) {
+            keys.forEach(function (k) { caches.delete(k); });
+          }).catch(function () {});
+        }
+      })();
+    </script>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <link rel="icon" type="image/png" href="/favicon.png" sizes="96x96" />
     <link rel="icon" type="image/png" href="/images/favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/jpeg" href="/images/favicon-48x48.jpg" sizes="48x48" />
     <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
-    <link rel="manifest" href="/site.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Woner.ru" />
+
+    <!-- Yandex.Metrika counter — как можно выше в <head> -->
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      (function (m, e, t, r, i, k, a) {
+        m[i] = m[i] || function () { (m[i].a = m[i].a || []).push(arguments); };
+        m[i].l = 1 * new Date();
+        for (var j = 0; j < document.scripts.length; j++) { if (document.scripts[j].src === r) { return; } }
+        k = e.createElement(t);
+        a = e.getElementsByTagName(t)[0];
+        k.async = 1;
+        k.src = r;
+        a.parentNode.insertBefore(k, a);
+      })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js?id=110082756', 'ym');
+
+      ym(110082756, 'init', {
+        ssr: true,
+        webvisor: true,
+        clickmap: true,
+        ecommerce: 'dataLayer',
+        referrer: document.referrer,
+        url: location.href,
+        accurateTrackBounce: true,
+        trackLinks: true,
+        defer: true
+      });
+    </script>
+    <!-- /Yandex.Metrika counter -->
 
     <!-- Primary SEO -->
     <title>Woner.ru — онлайн-запись для мастеров | CRM для салонов красоты</title>
@@ -43,11 +95,6 @@
 
     <!-- Theme -->
     <meta name="theme-color" content="#6A5ACD" />
-
-    <!-- Preconnect -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
     <!-- JSON-LD: Organization -->
     <script type="application/ld+json">
@@ -150,52 +197,23 @@
     }
     </script>
 
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
-    <div id="root"></div>
-    <!-- Yandex.Metrika counter -->
-    <script type="text/javascript">
-      window.dataLayer = window.dataLayer || [];
-      (function (m, e, t, r, i, k, a) {
-        m[i] =
-          m[i] ||
-          function () {
-            (m[i].a = m[i].a || []).push(arguments);
-          };
-        m[i].l = 1 * new Date();
-        for (var j = 0; j < document.scripts.length; j++) {
-          if (document.scripts[j].src === r) {
-            return;
-          }
-        }
-        k = e.createElement(t);
-        a = e.getElementsByTagName(t)[0];
-        k.async = 1;
-        k.src = r;
-        a.parentNode.insertBefore(k, a);
-      })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js?id=109476995', 'ym');
-
-      ym(109476995, 'init', {
-        ssr: true,
-        webvisor: true,
-        clickmap: true,
-        ecommerce: 'dataLayer',
-        referrer: document.referrer,
-        url: location.href,
-        accurateTrackBounce: true,
-        trackLinks: true
-      });
+    <noscript>
+      <div><img src="https://mc.yandex.ru/watch/110082756" style="position:absolute; left:-9999px;" alt="" /></div>
+    </noscript>
+    <div id="root">
+      <div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;color:#334155;text-align:center">
+        Загрузка Woner.ru…
+      </div>
+    </div>
+    <script>
+      window.setTimeout(function () {
+        var root = document.getElementById('root');
+        if (!root || root.dataset.mounted === '1') return;
+        window.__wonerBootError();
+      }, 30000);
     </script>
-    <noscript
-      ><div>
-        <img
-          src="https://mc.yandex.ru/watch/109476995"
-          style="position: absolute; left: -9999px"
-          alt=""
-        /></div
-    ></noscript>
-    <!-- /Yandex.Metrika counter -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

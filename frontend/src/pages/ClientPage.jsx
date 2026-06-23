@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
-import axios from 'axios';
+import api from '../lib/http.js';
 import {
   CalendarDays,
   Clock,
@@ -705,7 +705,10 @@ export default function ClientPage() {
     try {
       setLoading(true);
       setLoadError(null);
-      const res = await axios.get(`/api/master/${encodeURIComponent(masterId)}`);
+      const res = await api.get(`/master/${encodeURIComponent(masterId)}`);
+      if (!res.data?.master?.id) {
+        throw new Error('Пустой ответ сервера');
+      }
       const groups = res.data.priceGroups || [];
       const masters = res.data.teamMasters || [];
       const flat = res.data.priceList || groups.flatMap((g) => g.services);
@@ -728,7 +731,7 @@ export default function ClientPage() {
       setReviews(res.data.reviews || []);
     } catch (err) {
       console.error(err);
-      const msg = err.response?.data?.error;
+      const msg = err.response?.data?.error || (err.message !== 'Error' ? err.message : null);
       setLoadError(msg || (err.response?.status === 404 ? 'Мастер не найден' : 'Не удалось загрузить страницу'));
     } finally {
       setLoading(false);
@@ -739,8 +742,8 @@ export default function ClientPage() {
     if (!clientAuth) return;
     setAppointmentsLoading(true);
     try {
-      const res = await axios.get(
-        `/api/client/my/${encodeURIComponent(clientAuth.userId)}`,
+      const res = await api.get(
+        `/client/my/${encodeURIComponent(clientAuth.userId)}`,
         withClientAuth(clientAuth, {
           params: { channel: clientAuth.channel, masterId }
         })
@@ -766,6 +769,12 @@ export default function ClientPage() {
   }, [resolveAuthFromUrl, searchParams]);
 
   useEffect(() => {
+    if (!authPending) return undefined;
+    const timer = window.setTimeout(() => setAuthPending(false), 12000);
+    return () => window.clearTimeout(timer);
+  }, [authPending]);
+
+  useEffect(() => {
     if (!masterId || clientAuth?.clientToken) return;
 
     const initData = window.Telegram?.WebApp?.initData;
@@ -773,7 +782,7 @@ export default function ClientPage() {
       let cancelled = false;
       (async () => {
         try {
-          const res = await axios.post('/api/client/auth/telegram-webapp', { masterId, initData });
+          const res = await api.post('/client/auth/telegram-webapp', { masterId, initData });
           if (cancelled) return;
           const session = {
             channel: 'telegram',
@@ -806,7 +815,7 @@ export default function ClientPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await axios.post('/api/client/auth/deeplink', {
+        const res = await api.post('/client/auth/deeplink', {
           masterId,
           channel: ch,
           userId: uid,
@@ -879,7 +888,7 @@ export default function ClientPage() {
     if (identifySyncKeyRef.current === syncKey) return;
     identifySyncKeyRef.current = syncKey;
 
-    axios.post('/api/client/identify', {
+    api.post('/client/identify', {
       masterId,
       channel: clientAuth.channel,
       userId: clientAuth.userId,
@@ -919,8 +928,8 @@ export default function ClientPage() {
     (async () => {
       setRescheduleLoading(true);
       try {
-        const res = await axios.get(
-          `/api/client/appointment/${rescheduleId}`,
+        const res = await api.get(
+          `/client/appointment/${rescheduleId}`,
           withClientAuth(clientAuth, {
             params: { channel: clientAuth.channel, userId: clientAuth.userId }
           })
@@ -979,7 +988,7 @@ export default function ClientPage() {
         durationMinutes: String(selectedService?.duration_minutes || 60)
       });
       if (rescheduleId) params.set('excludeAppointmentId', rescheduleId);
-      const res = await axios.get(`/api/client/${masterId}/slots?${params.toString()}`);
+      const res = await api.get(`/client/${masterId}/slots?${params.toString()}`);
       if (requestId !== slotsRequestIdRef.current) return;
       const slots = res.data || [];
       setAvailableSlots(slots);
@@ -1083,10 +1092,10 @@ export default function ClientPage() {
       else payload.maxUserId = clientAuth.userId;
 
       if (rescheduleId) {
-        await axios.put(`/api/client/appointment/${rescheduleId}/reschedule`, payload, withClientAuth(clientAuth));
+        await api.put(`/client/appointment/${rescheduleId}/reschedule`, payload, withClientAuth(clientAuth));
       } else {
         console.log('[book] Запись на услугу:', payload);
-        await axios.post('/api/client/book', payload, withClientAuth(clientAuth));
+        await api.post('/client/book', payload, withClientAuth(clientAuth));
       }
 
       setStep('done');
@@ -1106,7 +1115,7 @@ export default function ClientPage() {
       const payload = { channel: clientAuth.channel, userId: clientAuth.userId };
       if (clientAuth.channel === 'telegram') payload.telegramUserId = clientAuth.userId;
       else payload.maxUserId = clientAuth.userId;
-      await axios.post(`/api/client/cancel/${appointmentId}`, payload, withClientAuth(clientAuth));
+      await api.post(`/client/cancel/${appointmentId}`, payload, withClientAuth(clientAuth));
       setConfirmDialog(null);
       await loadAppointments();
     } catch (err) {
@@ -1193,9 +1202,14 @@ export default function ClientPage() {
           <h2 style={{ fontSize: '20px', fontWeight: '800', color: PREMIUM.textPrimary, marginBottom: '8px' }}>
             {is404 ? 'Мастер не найден' : 'Не удалось открыть страницу'}
           </h2>
-          <p style={{ fontSize: '14px', color: PREMIUM.textSecondary }}>
+          <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '20px' }}>
             {is404 ? 'Проверьте ссылку или возьмите новую в кабинете мастера → Ссылки' : (loadError || 'Попробуйте обновить страницу позже')}
           </p>
+          {!is404 && (
+            <Button type="button" onClick={loadMasterData}>
+              Повторить
+            </Button>
+          )}
         </PremiumCard>
       </div>
     );

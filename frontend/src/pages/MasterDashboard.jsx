@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo, useCallback } from 'react';
+import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { AuthContext } from '../App';
@@ -76,6 +76,8 @@ export default function MasterDashboard() {
   );
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const selectedSalonMasterIdRef = useRef(null);
   const [activeSection, setActiveSection] = useState(() => searchParams.get('section') || 'overview');
   const [appointments, setAppointments] = useState([]);
   const [clients, setClients] = useState([]);
@@ -170,6 +172,7 @@ export default function MasterDashboard() {
   );
 
   const loadData = useCallback(async () => {
+    setLoadError('');
     try {
       const [appointmentsRes, clientsRes, linkRes] = await Promise.all([
         api.get('/appointments'),
@@ -179,6 +182,8 @@ export default function MasterDashboard() {
       setAppointments(appointmentsRes.data);
       setClients(clientsRes.data);
       setLinks(linkRes.data.links);
+      setLoading(false);
+
       await loadPortfolio();
 
       if (isTeamMember && user?.salonMasterId) {
@@ -188,6 +193,7 @@ export default function MasterDashboard() {
           logo_url: user.logo_url
         });
         setSelectedSalonMasterId(user.salonMasterId);
+        selectedSalonMasterIdRef.current = user.salonMasterId;
         await loadTeamScoped(user.salonMasterId);
         return;
       }
@@ -206,20 +212,29 @@ export default function MasterDashboard() {
       const active = teamRes.data.filter((m) => m.is_active !== false);
       setSalonMasters(teamRes.data);
       const teamId =
-        active.find((m) => m.id === selectedSalonMasterId)?.id || active[0]?.id || null;
+        active.find((m) => m.id === selectedSalonMasterIdRef.current)?.id || active[0]?.id || null;
       setSelectedSalonMasterId(teamId);
+      selectedSalonMasterIdRef.current = teamId;
       if (teamId) await loadTeamScoped(teamId);
     } catch (err) {
       console.error(err);
-      toast('Не удалось загрузить данные', 'error');
-    } finally {
       setLoading(false);
+      const timedOut = err?.code === 'ECONNABORTED';
+      const offline = !err?.response;
+      const message = timedOut
+        ? 'Сервер не отвечает. Проверьте интернет или попробуйте через Wi‑Fi.'
+        : offline
+          ? 'Нет связи с сервером. Проверьте интернет и обновите страницу.'
+          : 'Не удалось загрузить данные';
+      setLoadError(message);
+      toast(message, 'error');
     }
-  }, [api, toast, loadTeamScoped, loadPortfolio, selectedSalonMasterId, isTeamMember, user]);
+  }, [api, toast, loadTeamScoped, loadPortfolio, isTeamMember, user]);
 
   const handleTeamMasterChange = async (teamId) => {
     if (isTeamMember) return;
     setSelectedSalonMasterId(teamId);
+    selectedSalonMasterIdRef.current = teamId;
     try {
       await loadTeamScoped(teamId);
     } catch {
@@ -232,11 +247,13 @@ export default function MasterDashboard() {
       navigate('/login');
       return;
     }
+    setLoading(true);
     loadData();
     refreshNavBadges();
     const t = setInterval(refreshNavBadges, 20000);
     return () => clearInterval(t);
-  }, [user, navigate, loadData, refreshNavBadges]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per login
+  }, [user?.id]);
 
   useEffect(() => {
     const section = searchParams.get('section');
@@ -637,8 +654,6 @@ export default function MasterDashboard() {
 
   const clientBookingUrl = links?.client?.web || links?.max?.web;
 
-  if (loading) return <PageLoader />;
-
   return (
     <DashboardLayout
       profile={profile}
@@ -651,6 +666,17 @@ export default function MasterDashboard() {
         navigate('/login');
       }}
     >
+      {loading ? (
+        <PageLoader />
+      ) : loadError ? (
+        <div className="mx-auto max-w-md rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <p className="font-semibold text-rose-800">{loadError}</p>
+          <Button className="mt-4" onClick={() => { setLoading(true); loadData(); }}>
+            Повторить
+          </Button>
+        </div>
+      ) : (
+        <>
       <InstallPwaBanner />
       {activeSection === 'overview' && (
         <div className="space-y-6">
@@ -1300,6 +1326,8 @@ export default function MasterDashboard() {
           </div>
         )}
       </Modal>
+        </>
+      )}
     </DashboardLayout>
   );
 }
