@@ -54,6 +54,7 @@ router.get('/overview', adminAuthMiddleware, async (_req, res) => {
       paymentsMonth,
       paymentsPending,
       unlimitedActive,
+      perBookingActive,
       bookingFeesMonth,
     ] = await Promise.all([
       db.query('SELECT COUNT(*)::int AS c FROM masters'),
@@ -79,6 +80,14 @@ router.get('/overview', adminAuthMiddleware, async (_req, res) => {
            AND tariff_expires_at > NOW()`
       ),
       db.query(
+        `SELECT COUNT(*)::int AS c FROM masters
+         WHERE NOT (
+           tariff_type = 'unlimited'
+           AND tariff_expires_at IS NOT NULL
+           AND tariff_expires_at > NOW()
+         )`
+      ),
+      db.query(
         `SELECT COALESCE(SUM(ABS(amount)), 0)::numeric AS s FROM billing_transactions
          WHERE type = 'booking_fee'
            AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC')`
@@ -92,6 +101,7 @@ router.get('/overview', adminAuthMiddleware, async (_req, res) => {
       paymentsThisMonthRub: Number(paymentsMonth.rows[0].s),
       paymentsPending: paymentsPending.rows[0].c,
       unlimitedActive: unlimitedActive.rows[0].c,
+      perBookingActive: perBookingActive.rows[0].c,
       bookingFeesThisMonthRub: Number(bookingFeesMonth.rows[0].s),
     });
   } catch (err) {
@@ -104,7 +114,7 @@ router.get('/masters', adminAuthMiddleware, async (req, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
     const result = await db.query(
-      `SELECT id, email, name, last_name, salon_name, phone,
+      `SELECT id, email, name, last_name, salon_name, phone, public_slug,
               balance, tariff_type, tariff_expires_at, created_at
        FROM masters
        ORDER BY created_at DESC
