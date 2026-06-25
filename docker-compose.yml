@@ -111,6 +111,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.worker
     container_name: crm_max_notifications
+    env_file: .env
     environment:
       NODE_ENV: production
       DB_HOST: postgres
@@ -118,6 +119,7 @@ services:
       DB_NAME: crm_max
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD:-postgres123}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:5173}
       MAX_BOT_URL: http://bot:3001
       TELEGRAM_BOT_URL: http://telegram-bot:3002
     depends_on:

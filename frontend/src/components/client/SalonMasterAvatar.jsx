@@ -37,7 +37,7 @@ export default function SalonMasterAvatar({
         <img
           src={src}
           alt={formatSalonMasterName(master)}
-          loading="lazy"
+          loading={size >= 56 ? 'eager' : 'lazy'}
           decoding="async"
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           onError={() => setFailed(true)}

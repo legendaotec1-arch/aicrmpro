@@ -43,16 +43,47 @@ function encodeMasterId(masterId) {
   return Buffer.from(String(masterId)).toString('base64');
 }
 
-function buildBookingUrl(masterIdEncoded, userId, extra = {}) {
-  const params = new URLSearchParams({ ch: 'max' });
-  if (userId) params.set('uid', String(userId));
-  Object.entries(extra).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+function buildMaxSafariUrl(pathSegment, userId, masterIdEncoded) {
+  const params = new URLSearchParams({ ch: 'max', uid: String(userId), tab: 'booking' });
+  appendDeepLinkAuthParams(params, {
+    channel: 'max',
+    userId: String(userId),
+    masterIdEncoded: masterIdEncoded || pathSegment,
   });
-  if (userId) {
-    appendDeepLinkAuthParams(params, { channel: 'max', userId: String(userId), masterIdEncoded });
+  return `${PUBLIC_URL}/m/${pathSegment}?${params.toString()}`;
+}
+
+async function buildBookingLinks(pathSegment, userId, signMasterIdEncoded, extra = {}) {
+  const encoded = signMasterIdEncoded || pathSegment;
+  if (extra.reschedule || extra.tab) {
+    const params = new URLSearchParams({ ch: 'max' });
+    if (userId) params.set('uid', String(userId));
+    Object.entries(extra).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    const signKey = signMasterIdEncoded || pathSegment;
+    if (userId) {
+      appendDeepLinkAuthParams(params, { channel: 'max', userId: String(userId), masterIdEncoded: signKey });
+    }
+    const url = `${PUBLIC_URL}/m/${pathSegment}?${params.toString()}`;
+    return { buttonUrl: url, browserUrl: url };
   }
-  return `${PUBLIC_URL}/m/${masterIdEncoded}?${params.toString()}`;
+  const res = await axios.post(
+    `${API_BASE}/api/client/short-link`,
+    { masterId: encoded, channel: 'max', userId: String(userId) },
+    { timeout: 15000, headers: internalAuthHeaders() }
+  );
+  const safariUrl = res.data.browserUrl || buildMaxSafariUrl(pathSegment, userId, encoded);
+  return {
+    buttonUrl: safariUrl,
+    browserUrl: safariUrl,
+    openUrl: res.data.url,
+  };
+}
+
+async function buildBookingUrl(pathSegment, userId, signMasterIdEncoded, extra = {}) {
+  const links = await buildBookingLinks(pathSegment, userId, signMasterIdEncoded, extra);
+  return links.buttonUrl;
 }
 
 function absoluteUrl(path) {
@@ -85,30 +116,48 @@ function linkBtn(text, url) {
   return { type: 'link', text, url };
 }
 
+function clipboardBtn(text, payload) {
+  return { type: 'clipboard', text, payload };
+}
+
 function callbackBtn(text, payload) {
   return { type: 'callback', text, payload };
 }
 
-function bookingKeyboard(url, encoded) {
-  const rows = [[linkBtn('Записаться', url)]];
+function messageBtn(text) {
+  return { type: 'message', text };
+}
+
+function bookingKeyboard(buttonUrl, encoded, browserUrl = null) {
+  const openUrl = browserUrl || buttonUrl;
+  const rows = [
+    [linkBtn('Записаться', openUrl)],
+    [messageBtn(openUrl)],
+    [clipboardBtn('Скопировать ссылку', openUrl)],
+  ];
   if (encoded) rows.push([callbackBtn('Мои записи', `my_bookings:${encoded}`)]);
   return rows;
 }
 
-function bookingOnlyKeyboard(url) {
-  return [[linkBtn('Записаться', url)]];
+function bookingOnlyKeyboard(buttonUrl, browserUrl = null) {
+  const openUrl = browserUrl || buttonUrl;
+  return [
+    [linkBtn('Записаться', openUrl)],
+    [messageBtn(openUrl)],
+    [clipboardBtn('Скопировать ссылку', openUrl)],
+  ];
 }
 
 function appointmentKeyboard(apt, userId, fallbackMasterIdEncoded) {
   const encoded = fallbackMasterIdEncoded || encodeMasterId(apt.master_id);
-  const rescheduleUrl = buildBookingUrl(encoded, userId, {
+  const segment = apt.master_slug || encoded;
+  return buildBookingUrl(segment, userId, encoded, {
     tab: 'booking',
     reschedule: apt.id
-  });
-  return [
+  }).then((rescheduleUrl) => [
     [linkBtn('Перенести запись', rescheduleUrl)],
     [callbackBtn('Отменить запись', `cancel_apt:${apt.id}`)]
-  ];
+  ]);
 }
 
 function formatMasterCard(card) {
@@ -118,8 +167,9 @@ function formatMasterCard(card) {
   lines.push(
     '',
     '👇 Что можно сделать:',
-    '📅 Для записи нажмите «Записаться».',
-    '🗓 Посмотреть ваши записи — «Мои записи».'
+    '📅 Нажмите «Записаться» или кнопку со ссылкой ниже.',
+    '📋 На iPhone: зажмите ссылку в чате → «Скопировать» → вставьте в Safari.',
+    '🗓 «Мои записи» — ваши будущие визиты.'
   );
   return lines.join('\n');
 }
@@ -144,16 +194,17 @@ function messageUserId(message) {
 function parseStartRef(payloadOrText) {
   if (!payloadOrText) return null;
   const raw = String(payloadOrText).trim();
-  // MAX может прислать просто encoded ID или ref_<id>
-  if (raw.startsWith('ref_')) return raw.replace(/^ref_/, '');
-  // Также может быть /start <payload>
+  if (raw.startsWith('confirm_')) return { type: 'confirm', token: raw.replace(/^confirm_/, '') };
+  if (raw.startsWith('ref_')) return { type: 'ref', encoded: raw.replace(/^ref_/, '') };
   const parts = raw.split(/\s+/);
-  if (parts[0] === '/start' && parts[1]?.startsWith('ref_')) {
-    return parts[1].replace(/^ref_/, '');
+  if (parts[0] === '/start' && parts[1]?.startsWith('confirm_')) {
+    return { type: 'confirm', token: parts[1].replace(/^confirm_/, '') };
   }
-  // Или просто base64 ID без префикса — попробуем декодировать
+  if (parts[0] === '/start' && parts[1]?.startsWith('ref_')) {
+    return { type: 'ref', encoded: parts[1].replace(/^ref_/, '') };
+  }
   if (parts[0] === '/start' && parts[1]) {
-    return parts[1];
+    return { type: 'ref', encoded: parts[1] };
   }
   return null;
 }
@@ -167,8 +218,21 @@ async function fetchMasterCard(masterIdEncoded) {
       || (master.salon_name?.trim() ? master.salon_name.trim() : [master.name, master.last_name].filter(Boolean).join(' '))
       || 'Мастер',
     description: master.description || '',
-    photoUrl: absoluteUrl(master.logo_url)
+    photoUrl: absoluteUrl(master.logo_url),
+    pathSegment: master.public_slug || masterIdEncoded,
+    encoded: masterIdEncoded
   };
+}
+
+async function resolveBookingPathSegment(masterRef) {
+  if (!masterRef) return null;
+  if (/^[a-z0-9]+(-[a-z0-9]+)+$/i.test(String(masterRef))) return String(masterRef);
+  try {
+    const card = await fetchMasterCard(masterRef);
+    return card.pathSegment || masterRef;
+  } catch {
+    return masterRef;
+  }
 }
 
 async function syncClientAvatar({ userId, photoUrl, name }) {
@@ -187,9 +251,12 @@ async function syncClientAvatar({ userId, photoUrl, name }) {
 async function sendMaxMessage(userId, text, keyboardRows = null, options = {}) {
   const body = {
     text,
-    format: options.format || 'plain',
     notify: options.notify !== false
   };
+  // MAX API: format только "markdown" | "html" — "plain" ломает запрос (proto.payload)
+  if (options.format === 'markdown' || options.format === 'html') {
+    body.format = options.format;
+  }
   if (keyboardRows?.length) {
     body.attachments = [{ type: 'inline_keyboard', payload: { buttons: keyboardRows } }];
   }
@@ -267,8 +334,12 @@ async function sendMaxImageByUrl(userId, imageUrl, caption = '', keyboardRows = 
 
 async function answerCallback(callbackId, notification) {
   if (!callbackId) return;
-  const body = notification ? { notification } : {};
-  await api.post('/answers', body, { params: { callback_id: callbackId } });
+  const text = String(notification ?? '').trim() || '✓';
+  try {
+    await api.post('/answers', { notification: text }, { params: { callback_id: callbackId } });
+  } catch (err) {
+    console.error('MAX answerCallback error:', err.response?.data || err.message);
+  }
 }
 
 async function fetchAppointments(userId) {
@@ -279,12 +350,13 @@ async function fetchAppointments(userId) {
   return res.data;
 }
 
-async function sendMaxCardWithPhoto(userId, card, url) {
+async function sendMaxCardWithPhoto(userId, card, buttonUrl, browserUrl = null) {
+  const url = buttonUrl;
   // 1) Загружаем фото
   const uploadMeta = await api.post('/uploads', null, { params: { type: 'image' } });
   const uploadUrl = uploadMeta.data?.url;
   if (!uploadUrl) {
-    await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, card.encoded));
+    await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, card.encoded, browserUrl));
     return;
   }
 
@@ -311,13 +383,14 @@ async function sendMaxCardWithPhoto(userId, card, url) {
     }
   }
   if (!uploadToken) {
-    await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, card.encoded));
+    await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, card.encoded, browserUrl));
     return;
   }
 
   // 2) Отправляем ОДНО сообщение: текст + фото + кнопки
-  const text = formatMasterCard(card);
-  const keyboardRows = bookingKeyboard(url, card.encoded);
+  const displayUrl = browserUrl || url;
+  const text = `${formatMasterCard(card)}\n\n🔗 ${displayUrl}`;
+  const keyboardRows = bookingKeyboard(url, card.encoded, browserUrl);
 
   const body = {
     text,
@@ -333,46 +406,58 @@ async function sendMaxCardWithPhoto(userId, card, url) {
 }
 
 async function replyMasterCard(userId, encoded, user) {
-  const url = buildBookingUrl(encoded, userId);
   lastMasterByUser.set(userId, encoded);
   syncClientAvatar({ userId, photoUrl: maxPhotoFrom(user), name: user?.name }).catch(() => {});
 
   let card;
+  let pathSegment = await resolveBookingPathSegment(encoded);
+  let links;
   try {
     card = await fetchMasterCard(encoded);
     card.encoded = encoded;
+    pathSegment = card.pathSegment || pathSegment;
+    links = await buildBookingLinks(pathSegment, userId, encoded);
     console.log('replyMasterCard fetched:', { title: card.title, description: card.description?.slice(0, 100), hasPhoto: !!card.photoUrl });
   } catch (err) {
     console.error('MAX fetch master card error:', err.message);
+    links = await buildBookingLinks(pathSegment || encoded, userId, encoded);
     await sendMaxMessage(
       userId,
-      'Запись к мастеру\n\nДля записи нажмите кнопку «Записаться».',
-      bookingKeyboard(url, encoded)
+      'Запись к мастеру\n\nДля записи нажмите «Записаться».\n\n🔗 ' + links.browserUrl,
+      bookingKeyboard(links.buttonUrl, encoded, links.browserUrl)
     );
     return;
   }
 
   if (card.photoUrl) {
     try {
-      await sendMaxCardWithPhoto(userId, card, url);
+      await sendMaxCardWithPhoto(userId, card, links.buttonUrl, links.browserUrl);
       return;
     } catch (photoErr) {
       console.error('MAX photo send error:', photoErr.message);
     }
   }
 
-  await sendMaxMessage(userId, formatMasterCard(card), bookingKeyboard(url, encoded));
+  await sendMaxMessage(
+    userId,
+    `${formatMasterCard(card)}\n\n🔗 ${links.browserUrl}`,
+    bookingKeyboard(links.buttonUrl, encoded, links.browserUrl)
+  );
 }
 
 async function replyMyBookings(userId, masterIdEncoded = null) {
-  const bookingUrl = masterIdEncoded ? buildBookingUrl(masterIdEncoded, userId) : null;
+  let bookingUrl = null;
+  if (masterIdEncoded) {
+    const segment = await resolveBookingPathSegment(masterIdEncoded);
+    bookingUrl = await buildBookingUrl(segment || masterIdEncoded, userId, masterIdEncoded);
+  }
   try {
     const appointments = await fetchAppointments(userId);
     if (!appointments.length) {
       await sendMaxMessage(
         userId,
         'У вас пока нет записей.\n\nНажмите «Записаться», чтобы выбрать услугу и удобное время.',
-        bookingUrl ? bookingOnlyKeyboard(bookingUrl) : null
+        bookingUrl ? bookingOnlyKeyboard(bookingUrl, bookingUrl) : null
       );
       return;
     }
@@ -385,7 +470,7 @@ async function replyMyBookings(userId, masterIdEncoded = null) {
         minute: '2-digit'
       });
       const text = `🧾 ${escapeHtml(apt.service_name)}\n🕒 ${date}\n📍 ${escapeHtml(apt.address || '—')}`;
-      await sendMaxMessage(userId, text, appointmentKeyboard(apt, userId, masterIdEncoded));
+      await sendMaxMessage(userId, text, await appointmentKeyboard(apt, userId, masterIdEncoded));
     }
   } catch (err) {
     console.error(err);
@@ -419,6 +504,54 @@ async function relayClientMessageToSalonChat({ userId, userName, text }) {
   }
 }
 
+async function handleBookingConfirmOpen(userId, token, user) {
+  syncClientAvatar({ userId, photoUrl: maxPhotoFrom(user), name: user?.name }).catch(() => {});
+  try {
+    await axios.post(
+      `${API_BASE}/api/client/booking/messenger-open`,
+      { token, channel: 'max', userId: String(userId) },
+      { timeout: 20000, headers: internalAuthHeaders() }
+    );
+  } catch (err) {
+    const msg = err.response?.data?.error || 'Не удалось загрузить заявку';
+    if (err.response?.status === 410) {
+      await sendMaxMessage(userId, 'Время подтверждения истекло. Вернитесь на сайт и запишитесь снова.');
+      return;
+    }
+    await sendMaxMessage(userId, msg);
+  }
+}
+
+async function handleBookingConfirmClick(userId, token) {
+  try {
+    const res = await axios.post(
+      `${API_BASE}/api/client/booking/messenger-confirm`,
+      { token, channel: 'max', userId: String(userId) },
+      { timeout: 20000, headers: internalAuthHeaders() }
+    );
+    await sendMaxMessage(
+      userId,
+      '✅ *Запись подтверждена!*\n\nНапоминания придут сюда за *24 часа* и за *3 часа* до визита.',
+      null,
+      { format: 'markdown' }
+    );
+    if (res.data?.appointmentId) {
+      await sendMaxMessage(userId, `Номер записи: ${res.data.appointmentId.slice(0, 8)}…`);
+    }
+  } catch (err) {
+    const status = err.response?.status;
+    const msg = err.response?.data?.error || 'Не удалось подтвердить';
+    if (status === 409) {
+      await sendMaxMessage(
+        userId,
+        '❌ Это время уже занято.\n\nВернитесь на сайт и выберите другое время для записи.'
+      );
+      return;
+    }
+    await sendMaxMessage(userId, `❌ ${msg}`);
+  }
+}
+
 async function handleBotStarted(update) {
   const user = update.user;
   const userId = maxUserIdFrom(user) || update.chat_id?.toString();
@@ -433,9 +566,16 @@ async function handleBotStarted(update) {
     } catch (_) {}
   }
 
-  const encoded = parseStartRef(rawPayload);
-  console.log('handleBotStarted:', { userId, encoded, rawPayload });
+  const parsed = parseStartRef(rawPayload);
+  console.log('handleBotStarted:', { userId, parsed, rawPayload });
   syncClientAvatar({ userId, photoUrl: maxPhotoFrom(user), name: user?.name }).catch(() => {});
+
+  if (parsed?.type === 'confirm' && parsed.token) {
+    await handleBookingConfirmOpen(userId, parsed.token, user);
+    return;
+  }
+
+  const encoded = parsed?.type === 'ref' ? parsed.encoded : null;
 
   if (!encoded) {
     // Нет payload — значит пользователь просто открыл бот без ссылки мастера
@@ -460,9 +600,13 @@ async function handleMessageCreated(update) {
   const user = message.sender || message.from;
 
   if (text.startsWith('/start')) {
-    const encoded = parseStartRef(text);
-    if (encoded) {
-      await replyMasterCard(userId, encoded, user);
+    const parsed = parseStartRef(text);
+    if (parsed?.type === 'confirm' && parsed.token) {
+      await handleBookingConfirmOpen(userId, parsed.token, user);
+      return;
+    }
+    if (parsed?.type === 'ref' && parsed.encoded) {
+      await replyMasterCard(userId, parsed.encoded, user);
       return;
     }
     await sendMaxMessage(
@@ -521,14 +665,25 @@ async function handleMessageCallback(update) {
   const callback = update.callback;
   if (!callback) return;
 
-  const user = update.user || update.message?.sender;
+  const user = callback.user || update.user || update.message?.sender || update.message?.from;
   const userId = maxUserIdFrom(user) || messageUserId(update.message);
-  if (!userId) return;
+  if (!userId) {
+    console.error('MAX callback: no userId', JSON.stringify(update).slice(0, 400));
+    return;
+  }
 
   const payload = callback.payload || callback.data || '';
   const callbackId = callback.callback_id || callback.id;
 
   try {
+    if (payload.startsWith('confirm_booking:')) {
+      const token = payload.slice('confirm_booking:'.length);
+      console.log('MAX confirm_booking click:', { userId, token: token.slice(0, 12) + '…' });
+      await answerCallback(callbackId, 'Подтверждаем…');
+      await handleBookingConfirmClick(userId, token);
+      return;
+    }
+
     await answerCallback(callbackId, '');
 
     if (payload === 'services') {
@@ -597,7 +752,7 @@ app.post('/webhook', async (req, res) => {
       await handleBotStarted(update);
     } else if (type === 'message_created') {
       await handleMessageCreated(update);
-    } else if (type === 'message_callback') {
+    } else if (type === 'message_callback' || update.callback) {
       await handleMessageCallback(update);
     } else if (update.message) {
       await handleMessageCreated(update);
@@ -621,6 +776,25 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+app.post('/send-booking-confirm', requireInternalSecret, async (req, res) => {
+  try {
+    const { maxUserId, message, confirmToken } = req.body;
+    if (!maxUserId || !message || !confirmToken) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    await sendMaxMessage(
+      maxUserId,
+      message,
+      [[callbackBtn('Подтвердить запись', `confirm_booking:${confirmToken}`)]],
+      { format: 'markdown' }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('MAX send-booking-confirm error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
 app.post('/notify', requireInternalSecret, async (req, res) => {
   try {
     const { maxUserId, message, replyUrl, replyText, imageUrl } = req.body;
@@ -628,7 +802,7 @@ app.post('/notify', requireInternalSecret, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     const keyboard = replyUrl
-      ? [[linkBtn(replyText || 'Ответить мастеру', replyUrl)]]
+      ? [[linkBtn(replyText || 'Записаться', replyUrl)]]
       : null;
     if (imageUrl) {
       const sent = await sendMaxImageByUrl(maxUserId, imageUrl, message || '', keyboard);
@@ -636,7 +810,9 @@ app.post('/notify', requireInternalSecret, async (req, res) => {
         return res.status(500).json({ error: 'Failed to send image' });
       }
     } else {
-      await sendMaxMessage(maxUserId, message, keyboard, { format: 'markdown' });
+      const text = replyUrl ? `${message}\n\n🔗 ${replyUrl}` : message;
+      const msgOpts = req.body.format ? { format: req.body.format } : {};
+      await sendMaxMessage(maxUserId, text, keyboard, msgOpts);
     }
     res.json({ success: true });
   } catch (error) {

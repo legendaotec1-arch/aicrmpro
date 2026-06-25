@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './lib/http.js';
 import { clearToken, getToken, saveToken } from './lib/authStorage.js';
@@ -8,7 +8,7 @@ import { ToastProvider } from './context/ToastContext';
 import { PageLoader } from './components/ui/Spinner';
 
 import LandingPage from './pages/LandingPage';
-import ClientPage from './pages/ClientPage';
+const ClientPage = lazy(() => import('./pages/ClientPage'));
 import MasterLogin from './pages/MasterLogin';
 import MasterRegister from './pages/MasterRegister';
 import MasterDashboard from './pages/MasterDashboard';
@@ -18,6 +18,7 @@ import OfferPage from './pages/legal/OfferPage';
 import PrivacyPage from './pages/legal/PrivacyPage';
 import PaymentPage from './pages/legal/PaymentPage';
 import YandexMetrika from './components/analytics/YandexMetrika';
+import { isMessengerWebApp } from './lib/messengerWebApp';
 import AlternativeLandingPage from './pages/seo/AlternativeLandingPage';
 import ProgrammaticSeoPage from './pages/seo/ProgrammaticSeoPage';
 import SeoHubPage from './pages/seo/SeoHubPage';
@@ -35,6 +36,11 @@ import partnerApi from './lib/partnerApi.js';
 const AuthContext = createContext(null);
 
 api.interceptors.request.use((config) => {
+  const url = String(config.url || '');
+  // Клиентские запросы несут свой Bearer через withClientAuth — не подменять токеном мастера
+  if (config.headers?.Authorization || url.startsWith('/client/')) {
+    return config;
+  }
   const token = getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
@@ -151,10 +157,17 @@ function App() {
     <ToastProvider>
       <AuthProvider>
         <BrowserRouter>
-          <YandexMetrika />
+          {!isMessengerWebApp() && <YandexMetrika />}
           <Routes>
             <Route path="/" element={<LandingPage />} />
-            <Route path="/m/:masterId" element={<ClientPage />} />
+            <Route
+              path="/m/:masterId"
+              element={(
+                <Suspense fallback={<PageLoader />}>
+                  <ClientPage />
+                </Suspense>
+              )}
+            />
             <Route path="/login" element={<MasterLogin />} />
             <Route path="/register" element={<MasterRegister />} />
             <Route path="/legal/offer" element={<OfferPage />} />

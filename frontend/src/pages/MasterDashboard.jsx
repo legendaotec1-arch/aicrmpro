@@ -14,7 +14,8 @@ import EmptyState from '../components/ui/EmptyState';
 import { PageLoader } from '../components/ui/Spinner';
 import BookingLinkCard from '../components/dashboard/BookingLinkCard';
 import { DAYS, STATUS_LABELS, formatDate, formatDateTime, formatPrice, formatServicePrice } from '../lib/format';
-import { mediaUrl } from '../lib/media';
+import { useSafeInterval, useMountedRef } from '../lib/usePageVisible';
+import { useLeadingThrottle } from '../lib/useThrottledCallback';
 import TeamMasterSelect from '../components/dashboard/TeamMasterSelect';
 import SalonMastersSection from '../components/dashboard/SalonMastersSection';
 import ClientDetailModal from '../components/dashboard/ClientDetailModal';
@@ -33,6 +34,7 @@ import BillingSection from '../components/dashboard/BillingSection';
 import InstallPwaBanner, { showInstallPwaBanner } from '../components/pwa/InstallPwaBanner';
 import VideoReelCard from '../components/dashboard/VideoReelCard';
 import ServicePriceModal from '../components/dashboard/ServicePriceModal';
+import { getServiceNameError } from '../lib/serviceName';
 import OverviewStatsCard from '../components/dashboard/OverviewStatsCard';
 import RecentClientsCard from '../components/dashboard/RecentClientsCard';
 import AppointmentsSection from '../components/dashboard/AppointmentsSection';
@@ -78,6 +80,9 @@ export default function MasterDashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const selectedSalonMasterIdRef = useRef(null);
+  const loadGenRef = useRef(0);
+  const loadDataPromiseRef = useRef(null);
+  const mountedRef = useMountedRef();
   const [activeSection, setActiveSection] = useState(() => searchParams.get('section') || 'overview');
   const [appointments, setAppointments] = useState([]);
   const [clients, setClients] = useState([]);
@@ -169,6 +174,10 @@ export default function MasterDashboard() {
   );
 
   const loadData = useCallback(async () => {
+    if (loadDataPromiseRef.current) return loadDataPromiseRef.current;
+
+    const promise = (async () => {
+    const gen = ++loadGenRef.current;
     setLoadError('');
     try {
       const [appointmentsRes, clientsRes, linkRes] = await Promise.all([
@@ -176,12 +185,14 @@ export default function MasterDashboard() {
         api.get('/master/me/clients'),
         api.get('/master/me/link')
       ]);
+      if (gen !== loadGenRef.current || !mountedRef.current) return;
       setAppointments(appointmentsRes.data);
       setClients(clientsRes.data);
       setLinks(linkRes.data.links);
       setLoading(false);
 
       await loadPortfolio();
+      if (gen !== loadGenRef.current || !mountedRef.current) return;
 
       if (isTeamMember && user?.salonMasterId) {
         setProfile({
@@ -199,6 +210,7 @@ export default function MasterDashboard() {
         api.get('/master/me/profile'),
         api.get('/master/me/salon-masters')
       ]);
+      if (gen !== loadGenRef.current || !mountedRef.current) return;
       const profileData = profileRes.data;
       const socialDefaults = Object.fromEntries(
         MASTER_SOCIAL_FIELDS.map((f) => [f.key, profileData[f.key] ?? ''])
@@ -214,6 +226,7 @@ export default function MasterDashboard() {
       selectedSalonMasterIdRef.current = teamId;
       if (teamId) await loadTeamScoped(teamId);
     } catch (err) {
+      if (gen !== loadGenRef.current || !mountedRef.current) return;
       console.error(err);
       setLoading(false);
       const timedOut = err?.code === 'ECONNABORTED';
@@ -226,7 +239,15 @@ export default function MasterDashboard() {
       setLoadError(message);
       toast(message, 'error');
     }
-  }, [api, toast, loadTeamScoped, loadPortfolio, isTeamMember, user]);
+    })();
+
+    loadDataPromiseRef.current = promise;
+    try {
+      await promise;
+    } finally {
+      if (loadDataPromiseRef.current === promise) loadDataPromiseRef.current = null;
+    }
+  }, [api, toast, loadTeamScoped, loadPortfolio, isTeamMember, user, mountedRef]);
 
   const handleTeamMasterChange = async (teamId) => {
     if (isTeamMember) return;
@@ -247,10 +268,10 @@ export default function MasterDashboard() {
     setLoading(true);
     loadData();
     refreshNavBadges();
-    const t = setInterval(refreshNavBadges, 20000);
-    return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per login
   }, [user?.id]);
+
+  useSafeInterval(refreshNavBadges, 20000, Boolean(user));
 
   useEffect(() => {
     const section = searchParams.get('section');
@@ -291,10 +312,10 @@ export default function MasterDashboard() {
     }
   }, [searchParams, setSearchParams]);
 
-  const handleSectionChange = useCallback(
+  const handleSectionChangeRaw = useCallback(
     (id) => {
       if (isTeamMember && !TEAM_SECTIONS.has(id)) return;
-      setActiveSection(id);
+      setActiveSection((prev) => (prev === id ? prev : id));
       if (id === 'profile' && isTeamMember) {
         setProfileTab('portfolio');
       }
@@ -303,6 +324,7 @@ export default function MasterDashboard() {
     },
     [setSearchParams, isTeamMember, TEAM_SECTIONS]
   );
+  const handleSectionChange = useLeadingThrottle(handleSectionChangeRaw, 300);
 
   const handleDeleteClient = async () => {
     if (!clientDeleteTarget) return;
@@ -428,6 +450,11 @@ export default function MasterDashboard() {
 
   const handlePriceSubmit = async (e) => {
     e.preventDefault();
+    const nameErr = getServiceNameError(priceForm.name);
+    if (nameErr) {
+      toast(nameErr, 'error');
+      return;
+    }
     const priceNum = Number(priceForm.price);
     const priceMaxNum = priceForm.price_max !== '' ? Number(priceForm.price_max) : null;
     if (!Number.isFinite(priceNum) || priceNum < 0) {
@@ -449,7 +476,7 @@ export default function MasterDashboard() {
       }
       await api.post('/master/me/prices', {
         id: priceForm.id,
-        name: priceForm.name,
+        name: priceForm.name.trim().replace(/\s+/g, ' '),
         price: priceNum,
         price_max: priceForm.price_type === 'range' ? priceMaxNum : null,
         price_type: priceForm.price_type,
@@ -461,8 +488,8 @@ export default function MasterDashboard() {
       toast(priceForm.id ? 'Услуга обновлена' : 'Услуга добавлена');
       setShowPriceModal(false);
       loadData();
-    } catch {
-      toast('Ошибка сохранения услуги', 'error');
+    } catch (err) {
+      toast(err.response?.data?.error || 'Ошибка сохранения услуги', 'error');
     } finally {
       setSavingPrice(false);
     }
@@ -984,13 +1011,6 @@ export default function MasterDashboard() {
                     rows={3}
                     placeholder="Расскажите клиентам о себе и своих услугах"
                   />
-
-                  <Input
-                    label="Телефон"
-                    value={profileForm.phone || ''}
-                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                    placeholder="+7 (999) 123-45-67"
-                  />
                 </div>
 
                 <div className="h-px bg-admin-border" />
@@ -1058,8 +1078,10 @@ export default function MasterDashboard() {
             {profileTab === 'contacts' && (
               <div className="p-5">
                 <div className="mb-4">
-                  <p className="text-sm font-semibold text-admin-text">Каналы уведомлений</p>
-                  <p className="text-xs text-admin-textSecondary mt-0.5">Куда приходят заявки и уведомления о записях</p>
+                  <p className="text-sm font-semibold text-admin-text">Контакты и уведомления</p>
+                  <p className="text-xs text-admin-textSecondary mt-0.5">
+                    Телефон и Telegram для клиентов · email для писем о балансе и оплате
+                  </p>
                 </div>
                 <NotifySettingsCard api={api} toast={toast} />
               </div>

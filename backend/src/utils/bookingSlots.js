@@ -1,6 +1,7 @@
 const { getSalonMasterById } = require('./salonMasters');
 const { getSalonTimezone } = require('./salonTimezone');
 const { dayOfWeekFromDateStr, formatSalonIso, parseSalonIso } = require('./salonTime');
+const { hasOverlap } = require('./bookingLock');
 
 function generateTimeSlots(startTime, endTime, stepMinutes, dateStr, timeZone) {
   const slots = [];
@@ -106,17 +107,22 @@ async function getAvailableSlots(db, {
     [salonMasterId, dateStr, timeZone, excludeAppointmentId]
   );
 
+  const pending = await db.query(
+    `SELECT appointment_time, duration_minutes FROM booking_confirm_pending
+     WHERE salon_master_id = $1 AND status = 'pending' AND expires_at > NOW()
+       AND DATE(appointment_time AT TIME ZONE $3) = $2::date`,
+    [salonMasterId, dateStr, timeZone]
+  );
+
+  const blocked = [...booked.rows, ...pending.rows];
+
   const now = Date.now();
   const freeSlots = slots.filter((slotIso) => {
     const slotStart = parseSalonIso(slotIso).getTime();
     const slotEnd = slotStart + serviceDuration * 60000;
     if (slotStart < now) return false;
     if (slotEnd > endOfDayMs) return false;
-    return !booked.rows.some((b) => {
-      const bookedStart = new Date(b.appointment_time).getTime();
-      const bookedEnd = bookedStart + (b.duration_minutes || 60) * 60000;
-      return slotStart < bookedEnd && slotEnd > bookedStart;
-    });
+    return !hasOverlap(blocked, slotStart, slotEnd);
   });
 
   return freeSlots;

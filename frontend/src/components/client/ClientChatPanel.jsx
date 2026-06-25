@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import axios from 'axios';
+import api from '../../lib/http';
 import { withClientAuth } from '../../lib/clientApi';
+import { useSafeInterval, useMountedRef } from '../../lib/usePageVisible';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { formatDateTime } from '../../lib/format';
@@ -11,33 +12,36 @@ export default function ClientChatPanel({ masterId, clientAuth, formData }) {
   const [sending, setSending] = useState(false);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+  const mountedRef = useMountedRef();
 
   const load = async () => {
     if (!clientAuth) return;
     try {
-      const res = await axios.get(
-        `/api/client/${masterId}/chat?channel=${clientAuth.channel}&userId=${encodeURIComponent(clientAuth.userId)}`,
+      const res = await api.get(
+        `/client/${masterId}/chat?channel=${clientAuth.channel}&userId=${encodeURIComponent(clientAuth.userId)}`,
         withClientAuth(clientAuth)
       );
+      if (!mountedRef.current) return;
       setMessages(res.data.messages || []);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     } catch (err) {
+      if (!mountedRef.current) return;
       console.error(err);
     }
   };
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
-  }, [masterId, clientAuth]);
+  }, [masterId, clientAuth?.channel, clientAuth?.userId, clientAuth?.clientToken]);
+
+  useSafeInterval(load, 15000, Boolean(clientAuth?.clientToken));
 
   const send = async (e) => {
     e.preventDefault();
     if (!text.trim() || !clientAuth) return;
     setSending(true);
     try {
-      await axios.post(`/api/client/${masterId}/chat`, {
+      await api.post(`/client/${masterId}/chat`, {
         channel: clientAuth.channel,
         userId: clientAuth.userId,
         maxUserId: clientAuth.channel === 'max' ? clientAuth.userId : undefined,
@@ -52,7 +56,7 @@ export default function ClientChatPanel({ masterId, clientAuth, formData }) {
     } catch (err) {
       alert(err.response?.data?.error || 'Ошибка отправки');
     } finally {
-      setSending(false);
+      if (mountedRef.current) setSending(false);
     }
   };
 

@@ -14,7 +14,8 @@ const {
 } = require('../utils/clients');
 const { isRuPhoneComplete, normalizeRuPhoneForStorage } = require('../utils/phoneRu');
 const { validateBookingContact } = require('../utils/clientBookingValidation');
-const { resolveMasterId, isResolvedMasterId } = require('../utils/links');
+const { resolveMasterId, isResolvedMasterId, encodeMasterId } = require('../utils/links');
+const { resolveMasterIdFromParam } = require('../seo/masterSeo');
 const { getSalonMasterById } = require('../utils/salonMasters');
 const { getAvailableSlots } = require('../utils/bookingSlots');
 const { verifyTelegramLoginWidget, verifyTelegramWebAppInitData } = require('../utils/telegramAuth');
@@ -29,11 +30,31 @@ const {
 } = require('../utils/billing');
 const { requireInternalSecret } = require('../utils/internalAuth');
 const { signClientToken, requireClientAccess } = require('../utils/clientAuth');
-const { verifyDeepLinkAuth } = require('../utils/clientDeepLink');
+const { verifyDeepLinkAuthAny } = require('../utils/clientDeepLink');
+const { createClientOpenLink, exchangeOpenCode } = require('../utils/clientOpenLink');
 const { assertSlotAvailable, withBookingTransaction } = require('../utils/bookingLock');
 const { getSalonTimezone } = require('../utils/salonTimezone');
+const {
+  createPendingBooking,
+  attachMessengerAndSendConfirm,
+  confirmByMessenger,
+  confirmByEmailCode,
+  getConfirmStatus
+} = require('../utils/bookingConfirm');
 
 const router = express.Router();
+const { resolveSalonId } = require('../utils/salonResolve');
+
+router.param('masterId', async (req, res, next, value) => {
+  try {
+    const salonId = await resolveSalonId(value);
+    if (!salonId) return res.status(404).json({ error: 'Мастер не найден' });
+    req.resolvedSalonId = salonId;
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 const reviewPhotoStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
@@ -94,8 +115,8 @@ router.post('/identify', requireClientAccess, async (req, res) => {
     const { masterId, channel, userId, maxUserId, telegramUserId, name, phone, photoUrl } = req.body;
     if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
 
-    const salonId = resolveMasterId(masterId);
-    if (!isResolvedMasterId(salonId)) {
+    const salonId = await resolveMasterIdFromParam(masterId);
+    if (!salonId) {
       return res.status(404).json({ error: 'Мастер не найден' });
     }
 
@@ -132,14 +153,77 @@ router.post('/identify', requireClientAccess, async (req, res) => {
   }
 });
 
+// Короткая ссылка для ботов: https://woner.ru/o/Ab12Cd34
+router.post('/short-link', requireInternalSecret, async (req, res) => {
+  try {
+    const { masterId, channel, userId } = req.body;
+    if (!masterId || !channel || !userId) {
+      return res.status(400).json({ error: 'masterId, channel, userId required' });
+    }
+    const salonId = await resolveMasterIdFromParam(masterId);
+    if (!salonId) return res.status(404).json({ error: 'Мастер не найден' });
+    const link = await createClientOpenLink({
+      masterId: salonId,
+      channel: normalizeChannel(channel),
+      userId: String(userId),
+    });
+    const slugRes = await db.query('SELECT public_slug FROM masters WHERE id = $1', [salonId]);
+    const slug = slugRes.rows[0]?.public_slug;
+    if (slug) {
+      const ch = normalizeChannel(channel);
+      if (ch === 'max') {
+        const { buildSignedClientWebUrl } = require('../utils/clientDeepLink');
+        link.browserUrl = buildSignedClientWebUrl(salonId, 'max', userId, { tab: 'booking' }, slug);
+      } else {
+        const { getPublicUrl } = require('../utils/links');
+        link.browserUrl = `${getPublicUrl()}/m/${slug}?tab=booking&a=${link.code}`;
+      }
+    }
+    res.json(link);
+  } catch (error) {
+    console.error('Client short-link error:', error);
+    res.status(500).json({ error: 'Не удалось создать ссылку' });
+  }
+});
+
+// Вход по коду из бота (?a=код в URL страницы записи)
+router.post('/auth/open-code', async (req, res) => {
+  try {
+    const { code, masterId } = req.body;
+    if (!code) return res.status(400).json({ error: 'code required' });
+
+    const session = await exchangeOpenCode(String(code));
+    if (!session) {
+      return res.status(401).json({ error: 'Ссылка устарела. Откройте запись через бота.' });
+    }
+
+    if (masterId) {
+      const salonId = await resolveMasterIdFromParam(masterId);
+      if (salonId && salonId !== session.salonId) {
+        return res.status(403).json({ error: 'Неверная ссылка для этого мастера' });
+      }
+    }
+
+    res.json({
+      channel: session.channel,
+      userId: session.userId,
+      salonId: session.salonId,
+      clientToken: session.clientToken,
+    });
+  } catch (error) {
+    console.error('Client open-code auth error:', error);
+    res.status(500).json({ error: 'Ошибка авторизации' });
+  }
+});
+
 // Вход по подписанной ссылке из бота (ch, uid, exp, sig)
 router.post('/auth/deeplink', async (req, res) => {
   try {
     const { masterId, channel, userId, maxUserId, telegramUserId, exp, sig, firstName, photoUrl } = req.body;
     if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
 
-    const salonId = resolveMasterId(masterId);
-    if (!isResolvedMasterId(salonId)) {
+    const salonId = await resolveMasterIdFromParam(masterId);
+    if (!salonId) {
       return res.status(404).json({ error: 'Мастер не найден' });
     }
 
@@ -147,11 +231,10 @@ router.post('/auth/deeplink', async (req, res) => {
     const messengerUserId = userId || (messenger === 'telegram' ? telegramUserId : maxUserId);
     if (!messengerUserId) return res.status(400).json({ error: 'Не авторизован' });
 
-    const masterIdEncoded = masterId;
-    if (!verifyDeepLinkAuth({
+    if (!verifyDeepLinkAuthAny({
       channel: messenger,
       userId: String(messengerUserId),
-      masterIdEncoded,
+      masterIdCandidates: [masterId, encodeMasterId(salonId)],
       exp: Number(exp),
       sig
     })) {
@@ -180,6 +263,7 @@ router.post('/auth/deeplink', async (req, res) => {
       success: true,
       clientId,
       clientToken,
+      salonId,
       channel: messenger,
       userId: String(messengerUserId),
       firstName: firstName || null,
@@ -203,8 +287,8 @@ router.post('/auth/telegram-webapp', async (req, res) => {
     if (!masterId) return res.status(400).json({ error: 'Не указан мастер' });
     if (!initData) return res.status(400).json({ error: 'Нет данных Telegram' });
 
-    const salonId = resolveMasterId(masterId);
-    if (!isResolvedMasterId(salonId)) {
+    const salonId = await resolveMasterIdFromParam(masterId);
+    if (!salonId) {
       return res.status(404).json({ error: 'Мастер не найден' });
     }
 
@@ -234,6 +318,7 @@ router.post('/auth/telegram-webapp', async (req, res) => {
     res.json({
       success: true,
       clientId,
+      salonId,
       channel: 'telegram',
       userId: tgUser.telegramUserId,
       firstName: tgUser.firstName,
@@ -273,7 +358,10 @@ router.post('/auth/telegram', async (req, res) => {
       return res.status(400).json({ error: 'Не указан мастер' });
     }
 
-    const resolvedMasterId = resolveMasterId(masterId);
+    const resolvedMasterId = await resolveSalonId(masterId);
+    if (!resolvedMasterId) {
+      return res.status(404).json({ error: 'Мастер не найден' });
+    }
     const master = await db.query('SELECT id FROM masters WHERE id = $1', [resolvedMasterId]);
     if (master.rows.length === 0) {
       return res.status(404).json({ error: 'Мастер не найден' });
@@ -348,7 +436,10 @@ router.post('/reviews', requireClientAccess, reviewPhotoUpload.array('photos', 3
 
     const photo_urls = (req.files || []).slice(0, 3).map((f) => `/uploads/${f.filename}`);
 
-    const salonId = resolveMasterId(masterId);
+    const salonId = await resolveSalonId(masterId);
+    if (!salonId) {
+      return res.status(404).json({ error: 'Мастер не найден' });
+    }
     const messenger = normalizeChannel(channel);
     const messengerUserId = userId || (messenger === 'telegram' ? telegramUserId : maxUserId);
 
@@ -415,7 +506,7 @@ router.post('/reviews', requireClientAccess, reviewPhotoUpload.array('photos', 3
 // Чат с салоном (клиент)
 router.get('/:masterId/chat', requireClientAccess, async (req, res) => {
   try {
-    const salonId = resolveMasterId(req.params.masterId);
+    const salonId = req.resolvedSalonId;
     const channel = normalizeChannel(req.query.channel);
     const messengerUserId = req.query.userId;
     if (!messengerUserId) return res.status(400).json({ error: 'Не авторизован' });
@@ -433,7 +524,7 @@ router.get('/:masterId/chat', requireClientAccess, async (req, res) => {
 
 router.post('/:masterId/chat', requireClientAccess, async (req, res) => {
   try {
-    const salonId = resolveMasterId(req.params.masterId);
+    const salonId = req.resolvedSalonId;
     const { channel, userId, maxUserId, telegramUserId, body, name } = req.body;
     const messenger = normalizeChannel(channel);
     const messengerUserId = userId || (messenger === 'telegram' ? telegramUserId : maxUserId);
@@ -465,10 +556,105 @@ router.post('/:masterId/chat', requireClientAccess, async (req, res) => {
   }
 });
 
+// Подтверждение записи: Telegram / MAX / Email (без предварительного входа)
+router.post('/booking/request-confirm', async (req, res) => {
+  try {
+    const {
+      masterId,
+      salonMasterId,
+      channel,
+      name,
+      phone,
+      email,
+      appointmentTime,
+      serviceName,
+      servicePrice,
+      duration,
+      clientNotes,
+      telegramUserId,
+      maxUserId
+    } = req.body;
+
+    const ch = String(channel || '').toLowerCase();
+    const messengerUserId = ch === 'telegram' ? telegramUserId : ch === 'max' ? maxUserId : null;
+
+    const result = await createPendingBooking({
+      masterId,
+      salonMasterId,
+      channel: ch,
+      name,
+      phone,
+      email,
+      appointmentTime,
+      serviceName,
+      servicePrice,
+      duration,
+      clientNotes,
+      messengerUserId: messengerUserId || null
+    });
+
+    res.status(201).json({ success: true, ...result });
+  } catch (error) {
+    console.error('booking/request-confirm:', error);
+    const status = error.status || 500;
+    res.status(status).json({
+      error: error.message || 'Ошибка при создании заявки',
+      code: error.code
+    });
+  }
+});
+
+router.post('/booking/confirm-email', async (req, res) => {
+  try {
+    const { token, code } = req.body;
+    if (!token) return res.status(400).json({ error: 'Не указан token' });
+    const result = await confirmByEmailCode({ token, code });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('booking/confirm-email:', error);
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка подтверждения' });
+  }
+});
+
+router.get('/booking/confirm-status/:token', async (req, res) => {
+  try {
+    const result = await getConfirmStatus(req.params.token);
+    res.json(result);
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка' });
+  }
+});
+
+router.post('/booking/messenger-open', requireInternalSecret, async (req, res) => {
+  try {
+    const { token, channel, userId, photoUrl, name } = req.body;
+    const result = await attachMessengerAndSendConfirm({ token, channel, userId, photoUrl, name });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('booking/messenger-open:', error);
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка' });
+  }
+});
+
+router.post('/booking/messenger-confirm', requireInternalSecret, async (req, res) => {
+  try {
+    const { token, channel, userId, photoUrl } = req.body;
+    const result = await confirmByMessenger({ token, channel, userId, photoUrl });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('booking/messenger-confirm:', error);
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message || 'Ошибка подтверждения' });
+  }
+});
+
 // Получить свободные слоты на дату
 router.get('/:masterId/slots', async (req, res) => {
   try {
-    const salonId = resolveMasterId(req.params.masterId);
+    const salonId = req.resolvedSalonId;
     const { date, salonMasterId, durationMinutes, excludeAppointmentId } = req.query;
 
     const slots = await getAvailableSlots(db, {
@@ -509,7 +695,10 @@ router.post('/book', requireClientAccess, async (req, res) => {
     console.log('[book] Received appointmentTime:', appointmentTime, 'typeof:', typeof appointmentTime);
 
     const messenger = normalizeChannel(channel);
-    const resolvedSalonId = resolveMasterId(masterId);
+    const resolvedSalonId = await resolveSalonId(masterId);
+    if (!resolvedSalonId) {
+      return res.status(404).json({ error: 'Мастер не найден' });
+    }
 
     if (!salonMasterId) {
       return res.status(400).json({ error: 'Укажите мастера' });
@@ -760,7 +949,7 @@ router.get('/my/:userId', requireClientAccess, async (req, res) => {
   try {
     const { userId } = req.params;
     const channel = normalizeChannel(req.query.channel);
-    const salonId = req.query.masterId ? resolveMasterId(req.query.masterId) : null;
+    const salonId = req.query.masterId ? await resolveSalonId(req.query.masterId) : null;
 
     const clientId = await getClientByMessengerUserId(channel, userId);
     if (!clientId) {
@@ -768,7 +957,7 @@ router.get('/my/:userId', requireClientAccess, async (req, res) => {
     }
 
     const appointments = await db.query(
-      `SELECT a.*, m.name as master_name, m.address
+      `SELECT a.*, m.name as master_name, m.address, m.public_slug as master_slug
        FROM appointments a
        JOIN masters m ON a.master_id = m.id
        WHERE a.client_id = $1 AND a.status = 'confirmed'

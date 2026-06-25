@@ -21,7 +21,8 @@ function createCorsOriginChecker() {
       callback(null, true);
       return;
     }
-    callback(new Error(`CORS blocked: ${origin}`));
+    // false = без CORS-заголовков, но ответ отдаётся (не 500 на статике)
+    callback(null, false);
   };
 }
 

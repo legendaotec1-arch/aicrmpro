@@ -6,8 +6,9 @@ export function mediaUrl(path) {
     return raw;
   }
   if (raw.startsWith('//')) return `https:${raw}`;
-  if (raw.startsWith('/uploads/') || raw.startsWith('/api/')) return raw;
-  if (raw.startsWith('uploads/')) return `/${raw}`;
-  if (raw.startsWith('/')) return raw;
-  return `/uploads/${raw.replace(/^\/+/, '')}`;
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+  if (raw.startsWith('/uploads/') || raw.startsWith('/api/')) return origin ? `${origin}${raw}` : raw;
+  if (raw.startsWith('uploads/')) return origin ? `${origin}/${raw}` : `/${raw}`;
+  if (raw.startsWith('/')) return origin ? `${origin}${raw}` : raw;
+  return origin ? `${origin}/uploads/${raw.replace(/^\/+/, '')}` : `/uploads/${raw.replace(/^\/+/, '')}`;
 }

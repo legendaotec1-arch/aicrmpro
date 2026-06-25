@@ -68,16 +68,16 @@
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.3);
   }
-  /* iOS Safari fallback - no blur, just semi-transparent bg */
-  @supports (-webkit-backdrop-filter: none) {
-    .card-glass, .glass, .glass-dark {
-      background: rgba(255, 255, 255, 0.9);
-    }
-  }
-  @supports not (-webkit-backdrop-filter: none) {
-    .card-glass, .glass, .glass-dark {
-      background: rgba(255, 255, 255, 0.95);
-    }
+  /* iOS Safari: blur тормозит при частых перерисовках — класс ставится в index.html */
+  html.ios-env .input-field,
+  html.ios-env .card-light,
+  html.ios-env .card-glass,
+  html.ios-env .glass,
+  html.ios-env .glass-header,
+  html.ios-env .glass-dark {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(255, 255, 255, 0.96) !important;
   }
   .chip {
     @apply rounded-full px-4 py-2 text-sm font-medium transition whitespace-nowrap;

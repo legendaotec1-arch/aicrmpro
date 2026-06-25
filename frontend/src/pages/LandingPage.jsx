@@ -18,6 +18,14 @@ import PricingSection from '../components/landing/PricingSection';
 import FeaturesSection from '../components/landing/FeaturesSection';
 import SiteFooter from '../components/layout/SiteFooter';
 import SiteHeader, { SITE_HEADER_OFFSET } from '../components/layout/SiteHeader';
+import SeoHead from '../seo/SeoHead';
+
+const HOME_SEO = {
+  title: 'Woner.ru — онлайн-запись и CRM для мастеров',
+  description:
+    'Woner.ru — сервис онлайн-записи для мастеров и салонов. Расписание, клиенты, прайс, портфолио и рассылки в MAX и Telegram. Начните бесплатно.',
+  canonical: 'https://woner.ru/',
+};
 
 const iconStroke = { strokeWidth: 1.75 };
 
@@ -51,6 +59,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-white text-ink">
+      <SeoHead {...HOME_SEO} />
       <SiteHeader />
 
       <main className={SITE_HEADER_OFFSET}>

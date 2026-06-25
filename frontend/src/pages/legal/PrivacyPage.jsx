@@ -284,6 +284,10 @@ export default function PrivacyPage() {
           </li>
         </ul>
       </Section>
+
+      <Section title="15. Упоминание Instagram*">
+        <p className="text-sm leading-relaxed text-slate-600">{L.metaDisclaimer}</p>
+      </Section>
     </LegalPageLayout>
   );
 }
