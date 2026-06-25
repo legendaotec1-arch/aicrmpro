@@ -544,12 +544,22 @@ router.delete('/files/:id', async (req, res) => {
 router.get('/finance/summary', async (_req, res) => {
   try {
     const tz = 'Europe/Moscow';
-    const [earnedToday, earnedTotal, withdrawnTotal, recent] = await Promise.all([
+    const [earnedToday, earned7d, earned30d, earnedTotal, withdrawnTotal, recent] = await Promise.all([
       db.query(
         `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments
          WHERE status = 'succeeded'
            AND created_at >= date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1`,
         [tz]
+      ),
+      db.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments
+         WHERE status = 'succeeded'
+           AND created_at >= NOW() - INTERVAL '7 days'`
+      ),
+      db.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments
+         WHERE status = 'succeeded'
+           AND created_at >= NOW() - INTERVAL '30 days'`
       ),
       db.query(
         `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments WHERE status = 'succeeded'`
@@ -564,11 +574,15 @@ router.get('/finance/summary', async (_req, res) => {
     ]);
 
     const earnedTodayRub = Number(earnedToday.rows[0].s);
+    const earned7dRub = Number(earned7d.rows[0].s);
+    const earned30dRub = Number(earned30d.rows[0].s);
     const earnedTotalRub = Number(earnedTotal.rows[0].s);
     const withdrawnRub = Number(withdrawnTotal.rows[0].s);
 
     res.json({
       earnedTodayRub,
+      earned7dRub,
+      earned30dRub,
       earnedTotalRub,
       withdrawnRub,
       balanceRub: earnedTotalRub - withdrawnRub,
