@@ -19,7 +19,8 @@ function setStaticCacheHeaders(res, filePath) {
   }
 
   if (normalized.includes('/assets/')) {
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    // Без immutable: после деплоя WebView не должен вечно держать ссылку на удалённый chunk
+    res.setHeader('Cache-Control', 'public, max-age=86400');
   }
 }
 

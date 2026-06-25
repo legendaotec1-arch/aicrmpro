@@ -21,6 +21,9 @@ const {
   mapTaskRow,
   mapTaskCommentRow,
   mapTaskAttachmentRow,
+  ensureTaskReadSchema,
+  markTaskCommentsRead,
+  countAllUnreadComments,
 } = require('../utils/adminWorkspace');
 
 const router = express.Router();
@@ -37,20 +40,33 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-router.get('/tasks', async (_req, res) => {
+router.get('/tasks', async (req, res) => {
   try {
+    await ensureTaskReadSchema();
+    const adminEmail = req.adminEmail;
     const result = await db.query(
       `SELECT t.id, t.title, t.description, t.status, t.assignee_email, t.created_by, t.priority,
               t.sort_order, t.created_at, t.updated_at,
               (SELECT COUNT(*)::int FROM admin_task_comments c WHERE c.task_id = t.id) AS comment_count,
-              (SELECT COUNT(*)::int FROM admin_task_attachments a WHERE a.task_id = t.id) AS attachment_count
+              (SELECT COUNT(*)::int FROM admin_task_attachments a WHERE a.task_id = t.id) AS attachment_count,
+              (
+                SELECT COUNT(*)::int FROM admin_task_comments c
+                WHERE c.task_id = t.id
+                  AND LOWER(c.created_by) <> LOWER($1)
+                  AND c.created_at > COALESCE(
+                    (SELECT r.last_read_at FROM admin_task_read_state r
+                     WHERE r.task_id = t.id AND LOWER(r.admin_email) = LOWER($1)),
+                    'epoch'::timestamptz
+                  )
+              ) AS unread_comment_count
        FROM admin_tasks t
        ORDER BY
          CASE t.status
            WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'review' THEN 3 WHEN 'done' THEN 4 ELSE 5
          END,
          t.sort_order ASC,
-         t.created_at DESC`
+         t.created_at DESC`,
+      [adminEmail]
     );
     res.json({
       tasks: result.rows.map(mapTaskRow),
@@ -59,6 +75,16 @@ router.get('/tasks', async (_req, res) => {
   } catch (err) {
     console.error('Admin tasks list:', err);
     res.status(500).json({ error: 'Не удалось загрузить задачи' });
+  }
+});
+
+router.get('/tasks/unread-total', async (req, res) => {
+  try {
+    const total = await countAllUnreadComments(req.adminEmail);
+    res.json({ total });
+  } catch (err) {
+    console.error('Admin tasks unread total:', err);
+    res.status(500).json({ error: 'Не удалось загрузить счётчик' });
   }
 });
 
@@ -170,6 +196,8 @@ router.delete('/tasks/:id', async (req, res) => {
 
 router.get('/tasks/:id', async (req, res) => {
   try {
+    await markTaskCommentsRead(req.params.id, req.adminEmail);
+
     const taskRes = await db.query(
       `SELECT id, title, description, status, assignee_email, created_by, priority, sort_order, created_at, updated_at
        FROM admin_tasks WHERE id = $1`,
@@ -200,6 +228,7 @@ router.get('/tasks/:id', async (req, res) => {
         ...row,
         comment_count: commentsRes.rows.length,
         attachment_count: attachmentsRes.rows.length,
+        unread_comment_count: 0,
       }),
       comments: commentsRes.rows.map(mapTaskCommentRow),
       attachments: attachmentsRes.rows.map(mapTaskAttachmentRow),
@@ -222,6 +251,7 @@ router.post('/tasks/:id/comments', async (req, res) => {
       `INSERT INTO admin_task_comments (task_id, body, created_by) VALUES ($1, $2, $3) RETURNING *`,
       [req.params.id, body, req.adminEmail]
     );
+    await markTaskCommentsRead(req.params.id, req.adminEmail);
     res.status(201).json({ comment: mapTaskCommentRow(result.rows[0]) });
   } catch (err) {
     console.error('Admin task comment:', err);

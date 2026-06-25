@@ -9,17 +9,20 @@ import {
   MessageSquare,
   Paperclip,
   Plus,
+  RotateCcw,
   Send,
   Trash2,
   Upload,
   X,
   KanbanSquare,
+  Check,
 } from 'lucide-react';
 import adminApi from '../../lib/adminApi';
+import { useSafeInterval } from '../../lib/usePageVisible';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Modal from '../ui/Modal';
-import { formatDate, formatFileSize } from './adminFormat';
+import { formatDate, formatFileSize, getAdminCommentStyles } from './adminFormat';
 
 const COLUMNS = [
   {
@@ -62,44 +65,78 @@ function fileIcon(name) {
   return FileText;
 }
 
-function TaskCard({ task, column, onOpen }) {
+function TaskCard({ task, column, onOpen, onStatusChange, statusChangingId }) {
   const pr = PRIORITY[task.priority] || PRIORITY.normal;
+  const isReview = task.status === 'review';
+  const busy = statusChangingId === task.id;
+
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(task)}
-      className="group w-full text-left rounded-xl bg-white p-3 shadow-md ring-1 ring-black/5 transition hover:shadow-lg hover:ring-violet-300/60 hover:-translate-y-0.5"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <p className="font-bold text-sm text-slate-900 leading-snug line-clamp-2">{task.title}</p>
-        <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase ${pr.class}`}>
-          {pr.label}
-        </span>
-      </div>
-      {task.description ? (
-        <p className="mt-1.5 text-xs text-slate-500 line-clamp-2 leading-relaxed">{task.description}</p>
+    <div className="group w-full rounded-xl bg-white p-3 shadow-md ring-1 ring-black/5 transition hover:shadow-lg hover:ring-violet-300/60">
+      <button type="button" onClick={() => onOpen(task)} className="w-full text-left">
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-bold text-sm text-slate-900 leading-snug line-clamp-2">{task.title}</p>
+          <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase ${pr.class}`}>
+            {pr.label}
+          </span>
+        </div>
+        {task.description ? (
+          <p className="mt-1.5 text-xs text-slate-500 line-clamp-2 leading-relaxed">{task.description}</p>
+        ) : null}
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          {task.assignee_name ? (
+            <span className="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+              {task.assignee_name}
+            </span>
+          ) : null}
+          {task.unread_comment_count > 0 ? (
+            <span
+              className="inline-flex items-center gap-0.5 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm"
+              title="Непрочитанные комментарии"
+            >
+              <MessageSquare size={10} />
+              {task.unread_comment_count}
+            </span>
+          ) : task.comment_count > 0 ? (
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+              <MessageSquare size={10} />
+              {task.comment_count}
+            </span>
+          ) : null}
+          {task.attachment_count > 0 ? (
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+              <Paperclip size={10} />
+              {task.attachment_count}
+            </span>
+          ) : null}
+        </div>
+      </button>
+      {isReview ? (
+        <div className="mt-2 flex gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="flex-1 !py-1.5 text-xs"
+            loading={busy}
+            onClick={() => onStatusChange(task, 'done')}
+          >
+            <Check size={12} className="mr-1" />
+            Готова
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="flex-1 !py-1.5 text-xs"
+            disabled={busy}
+            onClick={() => onStatusChange(task, 'in_progress')}
+          >
+            <RotateCcw size={12} className="mr-1" />
+            В работу
+          </Button>
+        </div>
       ) : null}
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        {task.assignee_name ? (
-          <span className="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-2 py-0.5 text-[10px] font-semibold text-white">
-            {task.assignee_name}
-          </span>
-        ) : null}
-        {task.comment_count > 0 ? (
-          <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">
-            <MessageSquare size={10} />
-            {task.comment_count}
-          </span>
-        ) : null}
-        {task.attachment_count > 0 ? (
-          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-            <Paperclip size={10} />
-            {task.attachment_count}
-          </span>
-        ) : null}
-      </div>
       <div className={`mt-2 h-0.5 rounded-full bg-gradient-to-r ${column.gradient} opacity-40 group-hover:opacity-100 transition`} />
-    </button>
+    </div>
   );
 }
 
@@ -227,6 +264,17 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
   const [cloudOpen, setCloudOpen] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const fileInputRef = useRef(null);
+  const commentsEndRef = useRef(null);
+  const onUpdatedRef = useRef(onUpdated);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onUpdatedRef.current = onUpdated;
+    onCloseRef.current = onClose;
+  }, [onUpdated, onClose]);
+
+  const selectClass =
+    'mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm font-medium bg-white';
 
   const loadDetail = useCallback(async () => {
     if (!taskId) return;
@@ -236,17 +284,23 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
       setTask(res.data.task);
       setComments(res.data.comments || []);
       setAttachments(res.data.attachments || []);
+      onUpdatedRef.current?.({ ...res.data.task, unread_comment_count: 0 });
     } catch (err) {
       alert(err?.response?.data?.error || 'Не удалось загрузить задачу');
-      onClose();
+      onCloseRef.current?.();
     } finally {
       setLoading(false);
     }
-  }, [taskId, onClose]);
+  }, [taskId]);
 
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  useEffect(() => {
+    if (loading) return;
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [comments, loading]);
 
   const patchTask = async (patch) => {
     setSavingTask(true);
@@ -269,8 +323,13 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
       const res = await adminApi.post(`/tasks/${taskId}/comments`, { body: commentText.trim() });
       setComments((prev) => [...prev, res.data.comment]);
       setCommentText('');
-      setTask((t) => (t ? { ...t, comment_count: (t.comment_count || 0) + 1 } : t));
-      onUpdated({ ...task, comment_count: (task?.comment_count || 0) + 1 });
+      setTask((t) => (t ? { ...t, comment_count: (t.comment_count || 0) + 1, unread_comment_count: 0 } : t));
+      onUpdatedRef.current?.({
+        ...task,
+        id: taskId,
+        comment_count: (task?.comment_count || 0) + 1,
+        unread_comment_count: 0,
+      });
     } catch (err) {
       alert(err?.response?.data?.error || 'Не удалось отправить');
     } finally {
@@ -290,7 +349,7 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
       });
       setAttachments((prev) => [...prev, res.data.attachment]);
       setTask((t) => (t ? { ...t, attachment_count: (t.attachment_count || 0) + 1 } : t));
-      onUpdated({ ...task, attachment_count: (task?.attachment_count || 0) + 1 });
+      onUpdatedRef.current?.({ ...task, id: taskId, attachment_count: (task?.attachment_count || 0) + 1 });
     } catch (err) {
       alert(err?.response?.data?.error || 'Не удалось загрузить');
     } finally {
@@ -304,7 +363,7 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
       setAttachments((prev) => [...prev, res.data.attachment]);
       setCloudOpen(false);
       setTask((t) => (t ? { ...t, attachment_count: (t.attachment_count || 0) + 1 } : t));
-      onUpdated({ ...task, attachment_count: (task?.attachment_count || 0) + 1 });
+      onUpdatedRef.current?.({ ...task, id: taskId, attachment_count: (task?.attachment_count || 0) + 1 });
     } catch (err) {
       alert(err?.response?.data?.error || 'Не удалось прикрепить');
     }
@@ -315,7 +374,7 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
       await adminApi.delete(`/tasks/${taskId}/attachments/${attachmentId}`);
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
       setTask((t) => (t ? { ...t, attachment_count: Math.max(0, (t.attachment_count || 1) - 1) } : t));
-      onUpdated({ ...task, attachment_count: Math.max(0, (task?.attachment_count || 1) - 1) });
+      onUpdatedRef.current?.({ ...task, id: taskId, attachment_count: Math.max(0, (task?.attachment_count || 1) - 1) });
     } catch (err) {
       alert(err?.response?.data?.error || 'Не удалось открепить');
     }
@@ -343,192 +402,133 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
         open={Boolean(taskId)}
         onClose={onClose}
         title={loading ? 'Загрузка…' : task?.title}
-        size="xl"
+        description={!loading && task ? `${task.created_by_name} · ${formatDate(task.created_at)}` : undefined}
+        size="2xl"
         bleed
         footer={null}
       >
         {loading || !task ? (
           <p className="p-5 text-slate-500">Загрузка…</p>
         ) : (
-          <div className="flex flex-col min-h-0">
-            {col ? (
-              <div className={`bg-gradient-to-r ${col.gradient} px-5 py-3`}>
-                <span className="inline-flex rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white backdrop-blur-sm">
+          <div className="flex flex-col min-h-0 max-h-[85vh]">
+            <div className="shrink-0 border-b border-slate-100 px-5 py-3 flex flex-wrap items-end gap-3">
+              {col ? (
+                <span className={`rounded-lg bg-gradient-to-r ${col.gradient} px-2.5 py-1 text-xs font-bold text-white`}>
                   {col.label}
                 </span>
+              ) : null}
+              <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+                <select className={selectClass} value={task.status} disabled={savingTask} onChange={(e) => patchTask({ status: e.target.value })}>
+                  {columns.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+                <select className={selectClass} value={task.assignee_email || ''} disabled={savingTask} onChange={(e) => patchTask({ assignee_email: e.target.value || null })}>
+                  <option value="">Не назначен</option>
+                  {team.map((m) => (
+                    <option key={m.email} value={m.email}>{m.name}</option>
+                  ))}
+                </select>
+                <select className={selectClass} value={task.priority} disabled={savingTask} onChange={(e) => patchTask({ priority: e.target.value })}>
+                  <option value="low">Низкий</option>
+                  <option value="normal">Обычный</option>
+                  <option value="high">Высокий</option>
+                </select>
               </div>
-            ) : null}
+            </div>
 
-            <div className="p-5 space-y-5 overflow-y-auto max-h-[calc(90vh-8rem)]">
-              <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex-1 min-h-0 grid gap-0 lg:grid-cols-2 overflow-hidden">
+              <div className="p-5 space-y-4 overflow-y-auto border-b lg:border-b-0 lg:border-r border-slate-100">
                 <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Статус</label>
-                  <select
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium"
-                    value={task.status}
-                    disabled={savingTask}
-                    onChange={(e) => patchTask({ status: e.target.value })}
-                  >
-                    {columns.map((c) => (
-                      <option key={c.id} value={c.id}>{c.label}</option>
-                    ))}
-                  </select>
+                  <h4 className="text-sm font-semibold text-slate-800 mb-2">Описание</h4>
+                  <textarea
+                    key={task.id}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-sm leading-relaxed text-slate-800 min-h-[12rem] resize-y focus:border-violet-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-100"
+                    defaultValue={task.description || ''}
+                    placeholder="Что нужно сделать…"
+                    onBlur={(e) => {
+                      const val = e.target.value;
+                      if (val !== (task.description || '')) {
+                        patchTask({ description: val, title: task.title });
+                      }
+                    }}
+                  />
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Исполнитель</label>
-                  <select
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium"
-                    value={task.assignee_email || ''}
-                    disabled={savingTask}
-                    onChange={(e) => patchTask({ assignee_email: e.target.value || null })}
-                  >
-                    <option value="">Не назначен</option>
-                    {team.map((m) => (
-                      <option key={m.email} value={m.email}>{m.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Приоритет</label>
-                  <select
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium"
-                    value={task.priority}
-                    disabled={savingTask}
-                    onChange={(e) => patchTask({ priority: e.target.value })}
-                  >
-                    <option value="low">Низкий</option>
-                    <option value="normal">Обычный</option>
-                    <option value="high">Высокий</option>
-                  </select>
-                </div>
-              </div>
 
-              <div className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                  <h4 className="text-sm font-semibold text-slate-800">Описание</h4>
-                  <p className="text-xs text-slate-400">
-                    {task.created_by_name} · {formatDate(task.created_at)}
-                  </p>
-                </div>
-                <textarea
-                  key={task.id}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3.5 text-base leading-7 text-slate-800 placeholder:text-slate-400 focus:border-violet-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 min-h-[10rem] resize-y"
-                  defaultValue={task.description || ''}
-                  placeholder="Что нужно сделать — опишите задачу подробно…"
-                  onBlur={(e) => {
-                    const val = e.target.value;
-                    if (val !== (task.description || '')) {
-                      patchTask({ description: val, title: task.title });
-                    }
-                  }}
-                />
-                <p className="mt-2.5 text-xs text-slate-400">
-                  Текст сохраняется автоматически при выходе из поля
-                </p>
-              </div>
-
-              <div>
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                    <Paperclip size={16} className="text-amber-500" />
-                    Вложения
-                  </h4>
-                  <div className="flex gap-2">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      className="hidden"
-                      accept={DOC_ACCEPT}
-                      onChange={(e) => {
-                        uploadFile(e.target.files?.[0]);
-                        e.target.value = '';
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      loading={uploading}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Upload size={14} className="mr-1" />
-                      Word / Excel
-                    </Button>
-                    <Button type="button" size="sm" variant="secondary" onClick={() => setCloudOpen(true)}>
-                      <Cloud size={14} className="mr-1" />
-                      Из Облака
-                    </Button>
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Paperclip size={14} className="text-amber-500" />
+                      Вложения
+                    </h4>
+                    <div className="flex gap-1.5">
+                      <input ref={fileInputRef} type="file" className="hidden" accept={DOC_ACCEPT} onChange={(e) => { uploadFile(e.target.files?.[0]); e.target.value = ''; }} />
+                      <Button type="button" size="sm" variant="secondary" loading={uploading} onClick={() => fileInputRef.current?.click()}>
+                        <Upload size={14} className="mr-1" />
+                        Файл
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" onClick={() => setCloudOpen(true)}>
+                        <Cloud size={14} className="mr-1" />
+                        Облако
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                {attachments.length === 0 ? (
-                  <p className="text-sm text-slate-400 rounded-xl border border-dashed border-slate-200 py-6 text-center">
-                    Нет вложений
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {attachments.map((att) => {
-                      const Icon = fileIcon(att.original_name);
-                      return (
-                        <div
-                          key={att.id}
-                          className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200 shadow-sm"
-                        >
-                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-100 to-fuchsia-100">
-                            <Icon size={18} className="text-violet-600" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-900 truncate">{att.original_name}</p>
-                            <p className="text-[10px] text-slate-400">
-                              {formatFileSize(att.size_bytes)} · {att.attached_by_name}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => downloadFile(att.file_id, att.original_name)}
-                            className="rounded-lg p-2 text-slate-400 hover:bg-violet-50 hover:text-violet-600"
-                          >
-                            <Download size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => detach(att.id)}
-                            className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
-                          >
-                            <X size={15} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <h4 className="font-bold text-slate-900 flex items-center gap-2 mb-3">
-                  <MessageSquare size={16} className="text-blue-500" />
-                  Комментарии
-                </h4>
-                <div className="space-y-2 max-h-48 overflow-y-auto mb-3">
-                  {comments.length === 0 ? (
-                    <p className="text-sm text-slate-400">Пока нет комментариев</p>
+                  {attachments.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-xl">Нет вложений</p>
                   ) : (
-                    comments.map((c) => (
-                      <div key={c.id} className="rounded-xl bg-blue-50/80 px-3 py-2.5 ring-1 ring-blue-100">
-                        <p className="text-sm text-slate-800 whitespace-pre-wrap">{c.body}</p>
-                        <p className="mt-1 text-[10px] font-medium text-blue-500/80">
-                          {c.author_name} · {formatDate(c.created_at)}
-                        </p>
-                      </div>
-                    ))
+                    <div className="space-y-1.5">
+                      {attachments.map((att) => {
+                        const Icon = fileIcon(att.original_name);
+                        return (
+                          <div key={att.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200">
+                            <Icon size={16} className="text-violet-600 shrink-0" />
+                            <span className="text-xs font-medium text-slate-800 truncate flex-1">{att.original_name}</span>
+                            <button type="button" onClick={() => downloadFile(att.file_id, att.original_name)} className="p-1 text-slate-400 hover:text-violet-600"><Download size={14} /></button>
+                            <button type="button" onClick={() => detach(att.id)} className="p-1 text-slate-400 hover:text-rose-500"><X size={14} /></button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-                <form onSubmit={sendComment} className="flex gap-2">
+              </div>
+
+              <div className="flex flex-col min-h-0 p-5 bg-slate-50/50">
+                <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 mb-3 shrink-0">
+                  <MessageSquare size={14} className="text-blue-500" />
+                  Комментарии
+                </h4>
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 mb-3 pr-1">
+                  {comments.length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-8">Пока нет комментариев</p>
+                  ) : (
+                    comments.map((c) => {
+                      const st = getAdminCommentStyles(c.author_name);
+                      return (
+                        <div key={c.id} className={`rounded-xl px-3 py-2.5 ring-1 ${st.bubble}`}>
+                          <p className={`text-sm whitespace-pre-wrap ${st.text}`}>{c.body}</p>
+                          <p className={`mt-1 text-[10px] font-medium ${st.meta}`}>
+                            {c.author_name} · {formatDate(c.created_at)}
+                          </p>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={commentsEndRef} />
+                </div>
+                <form onSubmit={sendComment} className="shrink-0 flex gap-2">
                   <textarea
-                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm resize-none"
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm resize-none bg-white"
                     rows={2}
-                    placeholder="Написать комментарий…"
+                    placeholder="Комментарий… (Ctrl+Enter)"
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        sendComment(e);
+                      }
+                    }}
                   />
                   <Button type="submit" loading={savingComment} className="self-end">
                     <Send size={16} />
@@ -537,7 +537,7 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-slate-100 px-5 py-4 flex justify-between gap-2">
+            <div className="shrink-0 border-t border-slate-100 px-5 py-3 flex flex-wrap justify-between gap-2">
               <Button
                 type="button"
                 variant="secondary"
@@ -556,9 +556,23 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
                 <Trash2 size={14} className="mr-1" />
                 Удалить
               </Button>
-              <Button type="button" variant="secondary" onClick={onClose}>
-                Закрыть
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {task.status === 'review' ? (
+                  <>
+                    <Button type="button" size="sm" loading={savingTask} onClick={() => patchTask({ status: 'done' })}>
+                      <Check size={14} className="mr-1" />
+                      Готова
+                    </Button>
+                    <Button type="button" size="sm" variant="secondary" disabled={savingTask} onClick={() => patchTask({ status: 'in_progress' })}>
+                      <RotateCcw size={14} className="mr-1" />
+                      В работу
+                    </Button>
+                  </>
+                ) : null}
+                <Button type="button" variant="secondary" onClick={onClose}>
+                  Закрыть
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -569,7 +583,7 @@ function TaskDetailModal({ taskId, team, columns, onClose, onUpdated, onDeleted 
   );
 }
 
-export default function AdminTasksTab() {
+export default function AdminTasksTab({ onUnreadTotal }) {
   const [tasks, setTasks] = useState([]);
   const [team, setTeam] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -578,6 +592,12 @@ export default function AdminTasksTab() {
   const [form, setForm] = useState({ title: '', description: '', assignee_email: '', priority: 'normal' });
   const [saving, setSaving] = useState(false);
   const [openTaskId, setOpenTaskId] = useState(null);
+  const [statusChangingId, setStatusChangingId] = useState(null);
+
+  const reportUnreadTotal = useCallback((list) => {
+    const total = (list || []).reduce((s, t) => s + (t.unread_comment_count || 0), 0);
+    onUnreadTotal?.(total);
+  }, [onUnreadTotal]);
 
   const load = useCallback(async () => {
     setError('');
@@ -586,25 +606,49 @@ export default function AdminTasksTab() {
         adminApi.get('/tasks'),
         adminApi.get('/team'),
       ]);
-      setTasks(tasksRes.data.tasks || []);
+      const nextTasks = tasksRes.data.tasks || [];
+      setTasks(nextTasks);
       setTeam(teamRes.data.members || []);
+      reportUnreadTotal(nextTasks);
     } catch (err) {
       setError(err?.response?.data?.error || 'Не удалось загрузить задачи');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reportUnreadTotal]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const handleTaskUpdated = (updated) => {
-    setTasks((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
-  };
+  useSafeInterval(load, 30000, true);
+
+  const handleTaskUpdated = useCallback((updated) => {
+    setTasks((prev) => {
+      const next = prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t));
+      reportUnreadTotal(next);
+      return next;
+    });
+  }, [reportUnreadTotal]);
 
   const handleTaskDeleted = (taskId) => {
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setTasks((prev) => {
+      const next = prev.filter((t) => t.id !== taskId);
+      reportUnreadTotal(next);
+      return next;
+    });
+  };
+
+  const changeTaskStatus = async (task, status) => {
+    setStatusChangingId(task.id);
+    try {
+      const res = await adminApi.patch(`/tasks/${task.id}`, { status });
+      handleTaskUpdated(res.data.task);
+    } catch (err) {
+      alert(err?.response?.data?.error || 'Не удалось обновить статус');
+    } finally {
+      setStatusChangingId(null);
+    }
   };
 
   const createTask = async (e) => {
@@ -722,7 +766,14 @@ export default function AdminTasksTab() {
               </div>
               <div className="space-y-2.5">
                 {colTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} column={col} onOpen={(t) => setOpenTaskId(t.id)} />
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    column={col}
+                    onOpen={(t) => setOpenTaskId(t.id)}
+                    onStatusChange={changeTaskStatus}
+                    statusChangingId={statusChangingId}
+                  />
                 ))}
                 {colTasks.length === 0 ? (
                   <p className="py-8 text-center text-xs text-slate-400">Пусто</p>

@@ -68,7 +68,6 @@ async function sendBalanceAlertEmail({
   to,
   balance,
   level,
-  criticalThreshold,
   warnThreshold,
   perBookingFee
 }) {
@@ -76,28 +75,28 @@ async function sendBalanceAlertEmail({
   const dashboardUrl = `${(process.env.PUBLIC_URL || process.env.FRONTEND_URL || '').replace(/\/$/, '')}/dashboard?section=billing`;
 
   if (level === 'critical') {
-    const subject = `${SERVICE_NAME}: баланс ниже ${criticalThreshold} ₽ — записи приостановлены`;
+    const subject = `${SERVICE_NAME}: срочно пополните баланс — клиенты не могут записаться`;
     const text = [
       'Здравствуйте!',
       '',
       `На вашем балансе ${SERVICE_NAME} осталось ${balanceStr}.`,
-      `При балансе ниже ${criticalThreshold} ₽ новые записи (онлайн и в кабинете) временно недоступны.`,
-      `Пополните баланс от ${warnThreshold} ₽, чтобы снова создавать записи (${perBookingFee} ₽ за каждую запись).`,
+      `При балансе ниже ${perBookingFee} ₽ клиенты не могут забронировать дату и время онлайн.`,
+      'Срочно пополните баланс, чтобы снова принимать записи.',
       '',
-      `Личный кабинет: ${dashboardUrl}`,
+      `Пополнить баланс: ${dashboardUrl}`,
       '',
       `С уважением, команда ${SERVICE_NAME}`
     ].join('\n');
     return sendMail({ to, subject, text });
   }
 
-  const subject = `${SERVICE_NAME}: напоминание о балансе (${balanceStr})`;
+  const subject = `${SERVICE_NAME}: пополните баланс (${balanceStr})`;
   const text = [
     'Здравствуйте!',
     '',
-    `Напоминаем: на балансе ${SERVICE_NAME} сейчас ${balanceStr}.`,
-    'Рекомендуем пополнить баланс заранее, чтобы создание записей не прерывалось.',
-    `Списание: ${perBookingFee} ₽ за каждую запись (онлайн или в кабинете).`,
+    `На балансе ${SERVICE_NAME} сейчас ${balanceStr} — меньше рекомендуемых ${warnThreshold} ₽.`,
+    'Пополните баланс заранее, чтобы онлайн-запись не прерывалась.',
+    `Списание: ${perBookingFee} ₽ за каждую запись.`,
     '',
     `Пополнить баланс: ${dashboardUrl}`,
     '',

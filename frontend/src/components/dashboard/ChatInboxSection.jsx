@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useSafeInterval, useMountedRef } from '../../lib/usePageVisible';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -14,15 +15,18 @@ export default function ChatInboxSection({ api, toast, onUpdated }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef(null);
+  const mountedRef = useMountedRef();
 
   const loadConversations = async () => {
     try {
       const res = await api.get('/master/me/conversations');
+      if (!mountedRef.current) return;
       setConversations(res.data);
     } catch {
+      if (!mountedRef.current) return;
       toast('Не удалось загрузить чаты', 'error');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -40,9 +44,9 @@ export default function ChatInboxSection({ api, toast, onUpdated }) {
 
   useEffect(() => {
     loadConversations();
-    const t = setInterval(loadConversations, 30000);
-    return () => clearInterval(t);
   }, []);
+
+  useSafeInterval(loadConversations, 30000, true);
 
   useEffect(() => {
     if (activeId) loadMessages(activeId);

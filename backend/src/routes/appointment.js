@@ -389,7 +389,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
           : '';
 
         const message = `❌ Ваша запись на ${clientData.service_name} (${dateStr}) отменена мастером.${reasonStr}${contactStr}`;
-        await sendMessengerNotification(clientData, message);
+        await sendMessengerNotification(clientData, message, { appointmentId: id });
       } catch (notifyErr) {
         console.error('[appointment] Failed to send cancel notification:', notifyErr.message);
       }
@@ -439,7 +439,7 @@ router.post('/:id/message', authMiddleware, async (req, res) => {
     }
 
     const client = appointment.rows[0];
-    await sendMessengerNotification(client, message);
+    await sendMessengerNotification(client, message, { appointmentId: id });
 
     res.json({ success: true });
   } catch (error) {

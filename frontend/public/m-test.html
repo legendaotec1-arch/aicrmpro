@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>Woner — тест WebView</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #f8fafc 0%, #ede9fe 100%);
+      color: #334155;
+      padding: 24px;
+    }
+    .card {
+      max-width: 400px;
+      width: 100%;
+      background: #fff;
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(106, 90, 205, 0.12);
+    }
+    h1 { font-size: 22px; color: #6A5ACD; margin: 0 0 12px; }
+    p { font-size: 15px; line-height: 1.5; color: #64748b; margin: 0 0 16px; }
+    button {
+      width: 100%;
+      padding: 16px;
+      border: 0;
+      border-radius: 14px;
+      background: #6A5ACD;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #status { margin-top: 16px; font-size: 13px; color: #94a3b8; word-break: break-all; }
+    .ok { color: #16a34a; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Тест WebView</h1>
+    <p>Страница без React. Если вы видите это в Telegram/MAX — WebView открывает наш домен.</p>
+    <button type="button" id="btn">Записаться (тест)</button>
+    <p id="status">Загрузка…</p>
+  </div>
+  <script>
+    (function () {
+      var status = document.getElementById('status');
+      var lines = [
+        'time: ' + new Date().toISOString(),
+        'ua: ' + (navigator.userAgent || '').slice(0, 120),
+      ];
+      try {
+        var ping = new Image();
+        ping.onload = ping.onerror = function () {
+          lines.push('ping: ok');
+          status.innerHTML = lines.join('<br>');
+          status.className = 'ok';
+        };
+        ping.src = '/favicon.png?' + Date.now();
+      } catch (e) {
+        lines.push('ping err: ' + e.message);
+        status.innerHTML = lines.join('<br>');
+      }
+      document.getElementById('btn').addEventListener('click', function () {
+        status.textContent = 'Кнопка нажата в ' + new Date().toLocaleTimeString('ru-RU');
+      });
+      if (!lines.includes('ping: ok')) {
+        status.innerHTML = lines.join('<br>');
+      }
+    })();
+  </script>
+</body>
+</html>

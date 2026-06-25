@@ -25,7 +25,7 @@ const TABS = [
   { id: 'vault', label: 'Доступы', icon: KeyRound },
 ];
 
-export default function AdminLayout({ children, onRefresh, refreshing, onLogout }) {
+export default function AdminLayout({ children, onRefresh, refreshing, onLogout, tasksUnread = 0 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab') || 'overview';
 
@@ -62,7 +62,7 @@ export default function AdminLayout({ children, onRefresh, refreshing, onLogout 
               key={id}
               type="button"
               onClick={() => setTab(id)}
-              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              className={`relative inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
                 tab === id
                   ? 'bg-violet-600 text-white shadow-sm'
                   : 'text-slate-600 hover:bg-slate-100'
@@ -70,6 +70,11 @@ export default function AdminLayout({ children, onRefresh, refreshing, onLogout 
             >
               <Icon size={16} />
               {label}
+              {id === 'tasks' && tasksUnread > 0 ? (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+                  {tasksUnread > 99 ? '99+' : tasksUnread}
+                </span>
+              ) : null}
             </button>
           ))}
         </nav>

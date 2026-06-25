@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const db = require('../config/database');
 const { sendMessengerNotification } = require('../utils/notify');
 const { renderInviteMessage, buildBookingLink, resolveBookingLink } = require('../utils/repeatInvite');
+const { buildMessengerBookingUrl } = require('../utils/bookingPublicUrl');
 
 function formatTime(date) {
   return new Date(date).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -40,7 +41,13 @@ async function send24HourReminders() {
         `💅 Услуга: ${apt.service_name}\n\n` +
         `❌ Отменить запись: /cancel_${apt.id}`;
 
-      const sent = await sendMessengerNotification(apt, message);
+      const bookingUrl = await buildMessengerBookingUrl(apt.master_id, apt.messenger || 'telegram', apt.telegram_user_id || apt.max_user_id, 'booking');
+
+      const sent = await sendMessengerNotification(apt, message, {
+        appointmentId: apt.id,
+        replyUrl: bookingUrl,
+        replyText: 'Записаться',
+      });
       if (sent) {
         await db.query(`
           INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)
@@ -85,7 +92,13 @@ async function send3HourReminders() {
         `💅 Услуга: ${apt.service_name}\n\n` +
         `❌ Отменить: /cancel_${apt.id}`;
 
-      const sent = await sendMessengerNotification(apt, message);
+      const bookingUrl = await buildMessengerBookingUrl(apt.master_id, apt.messenger || 'telegram', apt.telegram_user_id || apt.max_user_id, 'booking');
+
+      const sent = await sendMessengerNotification(apt, message, {
+        appointmentId: apt.id,
+        replyUrl: bookingUrl,
+        replyText: 'Записаться',
+      });
       if (sent) {
         await db.query(`
           INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)
@@ -136,7 +149,18 @@ async function sendRepeatInvites() {
           bookingLink
         });
 
-        const sent = await sendMessengerNotification(apt, message);
+        const bookingUrl = await buildMessengerBookingUrl(
+          salon.id,
+          apt.telegram_user_id ? 'telegram' : 'max',
+          apt.telegram_user_id || apt.max_user_id,
+          'booking'
+        );
+
+        const sent = await sendMessengerNotification(apt, message, {
+          appointmentId: apt.id,
+          replyUrl: bookingUrl,
+          replyText: 'Записаться',
+        });
         if (sent) {
           await db.query(
             `INSERT INTO notifications (client_id, appointment_id, type, sent_at, status)

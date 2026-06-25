@@ -84,12 +84,67 @@ function evaluateOnlineBooking(row) {
 
 async function getMasterBillingRow(masterId, client = db) {
   const result = await client.query(
-    `SELECT id, email, balance, tariff_type, tariff_expires_at, tariff_auto_renew,
+    `SELECT id, email, notify_email, balance, tariff_type, tariff_expires_at, tariff_auto_renew,
             billing_warn_sent, billing_critical_sent
      FROM masters WHERE id = $1`,
     [masterId]
   );
   return result.rows[0] || null;
+}
+
+function billingAlertEmail(masterRow) {
+  const notify = String(masterRow?.notify_email || '').trim();
+  return notify || masterRow?.email || null;
+}
+
+async function checkAndSendBalanceAlerts(masterRow, client = db) {
+  const to = billingAlertEmail(masterRow);
+  if (!to) return;
+
+  const balance = Number(masterRow.balance ?? 0);
+  const updates = [];
+  const bookingBlocked = balance < PER_BOOKING_FEE;
+
+  if (bookingBlocked && !masterRow.billing_critical_sent) {
+    try {
+      await sendBalanceAlertEmail({
+        to,
+        balance,
+        level: 'critical',
+        warnThreshold: WARN_BALANCE,
+        perBookingFee: PER_BOOKING_FEE
+      });
+    } catch (mailErr) {
+      console.error('Balance alert email (critical):', mailErr.message);
+    }
+    updates.push('billing_critical_sent = TRUE');
+  } else if (!bookingBlocked && masterRow.billing_critical_sent) {
+    updates.push('billing_critical_sent = FALSE');
+  }
+
+  if (balance < WARN_BALANCE && !bookingBlocked && !masterRow.billing_warn_sent) {
+    try {
+      await sendBalanceAlertEmail({
+        to,
+        balance,
+        level: 'warn',
+        warnThreshold: WARN_BALANCE,
+        perBookingFee: PER_BOOKING_FEE
+      });
+    } catch (mailErr) {
+      console.error('Balance alert email (warn):', mailErr.message);
+    }
+    updates.push('billing_warn_sent = TRUE');
+  } else if (balance >= WARN_BALANCE && masterRow.billing_warn_sent) {
+    updates.push('billing_warn_sent = FALSE');
+  }
+
+  if (updates.length) {
+    await client.query(
+      `UPDATE masters SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $1`,
+      [masterRow.id]
+    );
+  }
 }
 
 async function listBillingTransactions(masterId, limit = 30) {
@@ -104,58 +159,6 @@ async function listBillingTransactions(masterId, limit = 30) {
   return result.rows;
 }
 
-async function checkAndSendBalanceAlerts(masterRow, client = db) {
-  if (!masterRow?.email) return;
-
-  const balance = Number(masterRow.balance ?? 0);
-  const updates = [];
-  const params = [];
-  let idx = 1;
-
-  if (balance < CRITICAL_BALANCE && !masterRow.billing_critical_sent) {
-    try {
-      await sendBalanceAlertEmail({
-        to: masterRow.email,
-        balance,
-        level: 'critical',
-        criticalThreshold: CRITICAL_BALANCE,
-        warnThreshold: WARN_BALANCE,
-        perBookingFee: PER_BOOKING_FEE
-      });
-    } catch (mailErr) {
-      console.error('Balance alert email (critical):', mailErr.message);
-    }
-    updates.push(`billing_critical_sent = TRUE`);
-  } else if (balance >= CRITICAL_BALANCE && masterRow.billing_critical_sent) {
-    updates.push(`billing_critical_sent = FALSE`);
-  }
-
-  if (balance < WARN_BALANCE && !masterRow.billing_warn_sent) {
-    try {
-      await sendBalanceAlertEmail({
-        to: masterRow.email,
-        balance,
-        level: 'warn',
-        criticalThreshold: CRITICAL_BALANCE,
-        warnThreshold: WARN_BALANCE,
-        perBookingFee: PER_BOOKING_FEE
-      });
-    } catch (mailErr) {
-      console.error('Balance alert email (warn):', mailErr.message);
-    }
-    updates.push(`billing_warn_sent = TRUE`);
-  } else if (balance >= WARN_BALANCE && masterRow.billing_warn_sent) {
-    updates.push(`billing_warn_sent = FALSE`);
-  }
-
-  if (updates.length) {
-    await client.query(
-      `UPDATE masters SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
-      [masterRow.id]
-    );
-  }
-}
-
 async function chargeBookingFee(masterId, appointmentId, { context = 'online' } = {}) {
   if (!isBillingEnabled()) return { charged: false };
 
@@ -164,7 +167,7 @@ async function chargeBookingFee(masterId, appointmentId, { context = 'online' } 
     await client.query('BEGIN');
 
     const locked = await client.query(
-      `SELECT id, email, balance, tariff_type, tariff_expires_at, tariff_auto_renew,
+      `SELECT id, email, notify_email, balance, tariff_type, tariff_expires_at, tariff_auto_renew,
               billing_warn_sent, billing_critical_sent
        FROM masters WHERE id = $1 FOR UPDATE`,
       [masterId]
@@ -244,7 +247,7 @@ async function applyTopup(masterId, amount, yookassaPaymentId) {
     }
 
     const locked = await client.query(
-      `SELECT id, email, balance, tariff_type, tariff_expires_at, tariff_auto_renew,
+      `SELECT id, email, notify_email, balance, tariff_type, tariff_expires_at, tariff_auto_renew,
               billing_warn_sent, billing_critical_sent
        FROM masters WHERE id = $1 FOR UPDATE`,
       [masterId]

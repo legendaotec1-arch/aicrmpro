@@ -53,7 +53,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Static files for uploads; missing files → 404 (не index.html SPA)
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(uploadsDir, {
+  maxAge: '7d',
+  etag: true,
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+  },
+}));
 app.use('/uploads', (_req, res) => {
   res.status(404).json({ error: 'File not found' });
 });
@@ -164,6 +170,15 @@ app.get('/robots.txt', (_req, res) => {
   res.type('text/plain').send(buildRobotsTxt());
 });
 
+app.get('/favicon.ico', (_req, res) => {
+  const faviconPath = path.join(frontendDist, 'favicon.png');
+  if (!fs.existsSync(faviconPath)) {
+    return res.status(404).end();
+  }
+  res.type('image/png');
+  res.sendFile(faviconPath);
+});
+
 registerIndexNowKeyRoute(app);
 
 app.get('/sitemap.xml', async (_req, res) => {
@@ -214,6 +229,27 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Диагностика старта booking в TG/MAX WebView (этапы BOOKING_HTML_LOADED, MAIN_JS_STARTED, …)
+app.post('/api/debug-log', (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const stage = String(body.stage || '').slice(0, 64);
+  if (!stage) return res.status(400).json({ error: 'stage required' });
+  const line = {
+    stage,
+    t: body.t || Date.now(),
+    path: body.path,
+    search: body.search ? String(body.search).slice(0, 120) : undefined,
+    ua: body.ua ? String(body.ua).slice(0, 80) : undefined,
+    ip: req.ip,
+    ...(body.masterId ? { masterId: String(body.masterId).slice(0, 64) } : {}),
+    ...(body.status != null ? { status: body.status } : {}),
+    ...(body.count != null ? { count: body.count } : {}),
+    ...(body.mode ? { mode: body.mode } : {}),
+  };
+  console.log('[client-boot]', JSON.stringify(line));
+  res.json({ ok: true });
+});
+
 // Публичные настройки для фронтенда (ключ карт — ограничьте по HTTP Referer в кабинете Яндекса)
 app.get('/api/app-assets', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -232,6 +268,31 @@ app.get('/api/config/public', (req, res) => {
     yandexMapsConfigured: Boolean((process.env.YANDEX_MAPS_API_KEY || '').trim()),
     billingEnabled: billingEnabled === 'true' || billingEnabled === '1' || billingEnabled === 'yes'
   });
+});
+
+// Короткая ссылка из бота → промежуточная страница → браузер с ?a=код
+app.get('/o/:code', async (req, res) => {
+  try {
+    const { getClientOpenLink, buildOpenBootstrapHtml } = require('./utils/clientOpenLink');
+
+    const row = await getClientOpenLink(req.params.code);
+    if (!row) {
+      return res.status(404).type('html').send(
+        '<!DOCTYPE html><html lang="ru"><body style="font-family:system-ui;padding:24px;text-align:center">'
+        + '<p>Ссылка устарела.</p><p>Откройте запись через бота ещё раз.</p></body></html>'
+      );
+    }
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.type('html').send(buildOpenBootstrapHtml({
+      slug: row.public_slug,
+      code: req.params.code,
+      channel: row.channel,
+    }));
+  } catch (err) {
+    console.error('Client open link:', err.message);
+    res.status(500).type('html').send('<!DOCTYPE html><html><body><p>Ошибка сервера</p></body></html>');
+  }
 });
 
 app.use('/api', (req, res) => {

@@ -5,6 +5,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const { uploadsDir } = require('../config/paths');
+const { optimizeMulterImage, createThumbnail } = require('../utils/imageOptimize');
 const axios = require('axios');
 const {
   buildMasterLinks,
@@ -18,7 +19,7 @@ const {
   getSalonMasterById,
   getPriceGroupsForSalon
 } = require('../utils/salonMasters');
-const { randomPasswordHash } = require('../utils/masterEmailAuth');
+const { validateServiceName } = require('../utils/serviceName');
 const { resolveTeamMasterId } = require('../utils/teamContext');
 const { getAvailableSlots } = require('../utils/bookingSlots');
 const { masterAuthMiddleware: authMiddleware, requireOwner } = require('../utils/masterAuth');
@@ -34,7 +35,8 @@ const { formatClientDisplayName } = require('../utils/clientDisplay');
 const { formatMasterPublicTitle } = require('../utils/masterDisplay');
 const { assignUniqueSlug, resolveMasterIdFromParam, buildMasterMeta } = require('../seo/masterSeo');
 const { extractCityFromAddress } = require('../utils/slugify');
-const { buildSocialLinksFromRow, pickSocialPayload } = require('../utils/socialLinks');
+const { buildSocialLinksFromRow, pickSocialPayload, normalizeSocialInput } = require('../utils/socialLinks');
+const { isRuPhoneComplete, normalizeRuPhoneForStorage } = require('../utils/phoneRu');
 const { upsertScheduleException, cleanupPastScheduleExceptions, salonTodayDateStr } = require('../utils/scheduleExceptions');
 const { listRussianTimezones, getTimezoneLabel, normalizeTimezone } = require('../utils/salonTime');
 const { getSalonTimezone } = require('../utils/salonTimezone');
@@ -82,13 +84,17 @@ const {
   buildBillingReturnUrl,
   resolveBillingPaymentReturn
 } = require('../utils/billing');
-const { buildSignedClientWebUrl } = require('../utils/clientDeepLink');
+const { buildMessengerBookingUrl } = require('../utils/bookingPublicUrl');
 const { createPayment, isYookassaConfigured } = require('../utils/yookassa');
 
 const router = express.Router();
 
-function buildClientWebUrl(masterId, channel, userId, tab = 'booking') {
-  return buildSignedClientWebUrl(masterId, channel, userId, tab ? { tab } : {});
+async function getMasterPublicSlug(masterId) {
+  return ensurePublicSlug(masterId);
+}
+
+async function buildClientWebUrl(masterId, channel, userId, tab = 'booking', publicSlug = null) {
+  return buildMessengerBookingUrl(masterId, channel, userId, tab, publicSlug);
 }
 
 function toAbsoluteUploadUrl(pathOrUrl) {
@@ -330,7 +336,8 @@ router.post('/me/salon-masters/:id/photo', authMiddleware, uploadImage.single('p
     if (!row) return res.status(404).json({ error: 'Мастер не найден' });
     if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
 
-    const photo_url = `/uploads/${req.file.filename}`;
+    const photo_url = await optimizeMulterImage(req.file, { maxWidth: 800, quality: 84 })
+      || `/uploads/${req.file.filename}`;
     await db.query('UPDATE salon_masters SET photo_url = $1 WHERE id = $2', [photo_url, req.params.id]);
     res.json({ photo_url });
   } catch (error) {
@@ -725,7 +732,8 @@ router.post('/me/logo', authMiddleware, uploadImage.single('logo'), async (req, 
       return res.status(400).json({ error: 'Файл не загружен' });
     }
 
-    const logo_url = `/uploads/${req.file.filename}`;
+    const logo_url = await optimizeMulterImage(req.file, { maxWidth: 800, quality: 84 })
+      || `/uploads/${req.file.filename}`;
     await db.query('UPDATE masters SET logo_url = $1, updated_at = NOW() WHERE id = $2', [logo_url, req.masterId]);
 
     res.json({ logo_url });
@@ -994,6 +1002,12 @@ router.post('/me/prices', authMiddleware, async (req, res) => {
     } = req.body;
     const salonMasterId = await resolveTeamMasterId(req.masterId, bodySalonMasterId, req.salonMasterId);
 
+    const nameCheck = validateServiceName(name);
+    if (!nameCheck.ok) {
+      return res.status(400).json({ error: nameCheck.error });
+    }
+    const serviceName = nameCheck.value;
+
     const type = ['fixed', 'from', 'to', 'range'].includes(price_type) ? price_type : 'fixed';
     const priceNum = Number(price);
     const priceMaxNum = price_max != null && price_max !== '' ? Number(price_max) : null;
@@ -1013,13 +1027,13 @@ router.post('/me/prices', authMiddleware, async (req, res) => {
       await db.query(
         `UPDATE price_items SET name = $1, price = $2, price_max = $3, price_type = $4, duration_minutes = $5,
          image_url = $6, sort_order = $7, is_active = $8 WHERE id = $9 AND salon_master_id = $10`,
-        [name, priceNum, storedMax, type, duration_minutes, image_url, sort_order || 0, is_active !== false, id, salonMasterId]
+        [serviceName, priceNum, storedMax, type, duration_minutes, image_url, sort_order || 0, is_active !== false, id, salonMasterId]
       );
     } else {
       await db.query(
         `INSERT INTO price_items (id, master_id, salon_master_id, name, price, price_max, price_type, duration_minutes, image_url, sort_order, is_active)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [uuidv4(), req.masterId, salonMasterId, name, priceNum, storedMax, type, duration_minutes, image_url, sort_order || 0, is_active !== false]
+        [uuidv4(), req.masterId, salonMasterId, serviceName, priceNum, storedMax, type, duration_minutes, image_url, sort_order || 0, is_active !== false]
       );
     }
 
@@ -1049,7 +1063,9 @@ router.post('/me/prices/upload', authMiddleware, uploadImage.single('image'), as
     if (!req.file) {
       return res.status(400).json({ error: 'Файл не загружен' });
     }
-    res.json({ image_url: `/uploads/${req.file.filename}` });
+    const image_url = await optimizeMulterImage(req.file, { maxWidth: 900, quality: 82 })
+      || `/uploads/${req.file.filename}`;
+    res.json({ image_url });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка при загрузке фото' });
   }
@@ -1093,17 +1109,22 @@ router.post('/me/portfolio', authMiddleware, uploadMedia.single('media'), async 
       return res.status(400).json({ error: 'Файл не загружен' });
     }
 
-    const file_url = req.file ? `/uploads/${req.file.filename}` : null;
-    const image_url = requestedType === 'image' ? file_url : null;
+    let file_url = req.file ? `/uploads/${req.file.filename}` : null;
+    let image_url = requestedType === 'image' ? file_url : null;
+    let thumbnail_url = null;
+    if (requestedType === 'image' && req.file) {
+      image_url = await optimizeMulterImage(req.file, { maxWidth: 1400, quality: 82 }) || file_url;
+      thumbnail_url = await createThumbnail(image_url, { width: 480, quality: 74 });
+    }
     const finalVideoUrl = requestedType === 'video' ? file_url : video_url?.trim() || null;
 
     await db.query(
-      `INSERT INTO portfolio (id, master_id, salon_master_id, image_url, media_type, video_url, title, sort_order)
-       VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`,
-      [uuidv4(), req.masterId, image_url, requestedType, finalVideoUrl, title, sort_order || 0]
+      `INSERT INTO portfolio (id, master_id, salon_master_id, image_url, thumbnail_url, media_type, video_url, title, sort_order)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`,
+      [uuidv4(), req.masterId, image_url, thumbnail_url, requestedType, finalVideoUrl, title, sort_order || 0]
     );
 
-    res.json({ success: true, image_url, video_url: finalVideoUrl, media_type: requestedType });
+    res.json({ success: true, image_url, thumbnail_url, video_url: finalVideoUrl, media_type: requestedType });
   } catch (error) {
     console.error(error);
     const status = error.status || 500;
@@ -1413,13 +1434,14 @@ router.post('/me/clients/:clientId/message', authMiddleware, async (req, res) =>
     );
 
     const c = client.rows[0];
+    const publicSlug = await getMasterPublicSlug(req.masterId);
     const notifyText = `💬 Сообщение от салона:\n\n${message.trim()}`;
     const notifyOpts = { channel: channel || 'all' };
     if (c.telegram_user_id) {
-      notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'telegram', c.telegram_user_id, 'chat');
+      notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'telegram', c.telegram_user_id, 'chat', publicSlug);
       notifyOpts.replyText = 'Ответить мастеру';
     } else if (c.max_user_id) {
-      notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'max', c.max_user_id, 'chat');
+      notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'max', c.max_user_id, 'chat', publicSlug);
       notifyOpts.replyText = 'Ответить мастеру';
     }
     const sent = await sendMessengerNotification(c, notifyText, notifyOpts);
@@ -1489,6 +1511,7 @@ router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
     }
 
     const imageUrl = toAbsoluteUploadUrl(opts.image_url);
+    const publicSlug = await getMasterPublicSlug(req.masterId);
     const notifyText = opts.message
       ? (opts.image_url ? opts.message : `💬 Сообщение от салона:\n\n${opts.message}`)
       : '';
@@ -1502,10 +1525,10 @@ router.post('/me/broadcast', authMiddleware, requireOwner, async (req, res) => {
         ...(imageUrl ? { imageUrl } : {}),
       };
       if (client.telegram_user_id) {
-        notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'telegram', client.telegram_user_id, 'booking');
+        notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'telegram', client.telegram_user_id, 'booking', publicSlug);
         notifyOpts.replyText = 'Записаться';
       } else if (client.max_user_id) {
-        notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'max', client.max_user_id, 'booking');
+        notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'max', client.max_user_id, 'booking', publicSlug);
         notifyOpts.replyText = 'Записаться';
       }
 
@@ -1547,14 +1570,16 @@ router.get('/me/nav-badges', authMiddleware, async (req, res) => {
 router.get('/me/notify-settings', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT social_telegram, social_max, phone
+      `SELECT phone, social_telegram, notify_email, email
        FROM masters WHERE id = $1`,
       [req.masterId]
     );
+    const row = result.rows[0] || {};
     res.json({
-      contact_telegram: result.rows[0]?.social_telegram || '',
-      contact_max: result.rows[0]?.social_max || '',
-      contact_phone: result.rows[0]?.phone || ''
+      contact_phone: row.phone || '',
+      contact_telegram: row.social_telegram || '',
+      notify_email: row.notify_email || row.email || '',
+      account_email: row.email || '',
     });
   } catch (error) {
     res.status(500).json({ error: 'Ошибка' });
@@ -1563,19 +1588,25 @@ router.get('/me/notify-settings', authMiddleware, async (req, res) => {
 
 router.put('/me/notify-settings', authMiddleware, async (req, res) => {
   try {
-    const { contact_telegram, contact_max, contact_phone } = req.body;
+    const { contact_telegram, contact_phone, notify_email } = req.body;
+    const phoneRaw = String(contact_phone || '').trim();
+    const phone = phoneRaw
+      ? (isRuPhoneComplete(phoneRaw) ? normalizeRuPhoneForStorage(phoneRaw) : phoneRaw)
+      : null;
+    const telegram = normalizeSocialInput('telegram', contact_telegram);
+    const emailRaw = String(notify_email || '').trim().toLowerCase();
+    const notifyEmail = emailRaw && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw) ? emailRaw : null;
+    if (emailRaw && !notifyEmail) {
+      return res.status(400).json({ error: 'Укажите корректный email' });
+    }
     await db.query(
       `UPDATE masters SET
         social_telegram = $1,
-        social_max = $2,
-        phone = $3
+        phone = $2,
+        notify_email = $3,
+        updated_at = NOW()
        WHERE id = $4`,
-      [
-        contact_telegram?.trim() || null,
-        contact_max?.trim() || null,
-        contact_phone?.trim() || null,
-        req.masterId
-      ]
+      [telegram, phone, notifyEmail, req.masterId]
     );
     res.json({ success: true });
   } catch (error) {
@@ -1704,13 +1735,14 @@ router.post('/me/conversations/:conversationId/messages', authMiddleware, async 
     await addMessage(req.params.conversationId, 'salon', text.trim());
 
     const c = conv.rows[0];
+    const publicSlug = await getMasterPublicSlug(req.masterId);
     const notifyText = `💬 Сообщение от салона:\n\n${text.trim()}`;
     const notifyOpts = {};
     if (c.telegram_user_id) {
-      notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'telegram', c.telegram_user_id, 'chat');
+      notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'telegram', c.telegram_user_id, 'chat', publicSlug);
       notifyOpts.replyText = 'Ответить мастеру';
     } else if (c.max_user_id) {
-      notifyOpts.replyUrl = buildClientWebUrl(req.masterId, 'max', c.max_user_id, 'chat');
+      notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'max', c.max_user_id, 'chat', publicSlug);
       notifyOpts.replyText = 'Ответить мастеру';
     }
     await sendMessengerNotification(c, notifyText, notifyOpts);
@@ -1783,7 +1815,15 @@ router.post('/me/clients/:clientId/repeat-invite', authMiddleware, async (req, r
       bookingLink,
     });
 
-    const sent = await sendMessengerNotification(c, msg, { channel: 'all' });
+    const publicSlug = await getMasterPublicSlug(req.masterId);
+    const notifyOpts = { channel: 'all', replyText: 'Записаться' };
+    if (c.telegram_user_id) {
+      notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'telegram', c.telegram_user_id, 'booking', publicSlug);
+    } else if (c.max_user_id) {
+      notifyOpts.replyUrl = await buildClientWebUrl(req.masterId, 'max', c.max_user_id, 'booking', publicSlug);
+    }
+
+    const sent = await sendMessengerNotification(c, msg, notifyOpts);
     if (!sent) return res.status(400).json({ error: 'У клиента нет мессенджера' });
 
     const channels = [];
