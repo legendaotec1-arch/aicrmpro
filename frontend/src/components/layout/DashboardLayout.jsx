@@ -241,11 +241,11 @@ export default function DashboardLayout({
         {/* Mobile full-screen menu */}
         {mobileMenuOpen && (
           <div
-            className="lg:hidden fixed inset-0 z-50 flex flex-col bg-white animate-fade-in"
+            className="lg:hidden fixed inset-0 z-50 flex flex-col bg-white animate-fade-in safe-top"
             role="dialog"
             aria-modal="true"
           >
-            <div className="flex items-center justify-between h-14 px-4 border-b border-admin-border shrink-0">
+            <div className="flex items-center justify-between h-14 px-4 border-b border-admin-border shrink-0 safe-top">
               <BrandName className="text-admin-text" />
               <button
                 type="button"
@@ -265,7 +265,7 @@ export default function DashboardLayout({
                 isTeamMember={isTeamMember}
               />
             </nav>
-            <div className="p-4 border-t border-admin-border shrink-0">
+            <div className="p-4 border-t border-admin-border shrink-0 safe-bottom">
               <Button
                 variant="ghost"
                 className="w-full justify-start gap-2 py-3 text-base text-rose-600 hover:bg-rose-50 hover:text-rose-700 focus-visible:ring-rose-300"
@@ -282,13 +282,13 @@ export default function DashboardLayout({
         )}
 
         {/* Main content */}
-        <div className="flex flex-1 flex-col min-h-0 pt-14 lg:pt-0">
-          <main className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 pb-32 lg:p-6 lg:pb-8">
+        <div className="flex flex-1 flex-col min-h-0 dashboard-mobile-header-offset lg:pt-0">
+          <main className="dashboard-mobile-main flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 lg:p-6 lg:pb-8">
             <div className="mx-auto w-full max-w-6xl">{children}</div>
           </main>
 
           {/* Mobile bottom tab bar */}
-          <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-admin-border safe-bottom">
+          <nav className="dashboard-mobile-tabbar lg:hidden fixed left-0 right-0 z-30 bg-white border-t border-admin-border">
             <div className="flex justify-around items-center h-16 px-1">
               {isTeamMember ? (
                 <>

@@ -14,8 +14,9 @@ import EmptyState from '../components/ui/EmptyState';
 import { PageLoader } from '../components/ui/Spinner';
 import BookingLinkCard from '../components/dashboard/BookingLinkCard';
 import { DAYS, STATUS_LABELS, formatDate, formatDateTime, formatPrice, formatServicePrice } from '../lib/format';
-import { useSafeInterval, useMountedRef } from '../lib/usePageVisible';
+import { useSafeInterval } from '../lib/usePageVisible';
 import { useLeadingThrottle } from '../lib/useThrottledCallback';
+import { dumpState, logEvent } from '../lib/clientLogger';
 import TeamMasterSelect from '../components/dashboard/TeamMasterSelect';
 import SalonMastersSection from '../components/dashboard/SalonMastersSection';
 import ClientDetailModal from '../components/dashboard/ClientDetailModal';
@@ -43,6 +44,7 @@ import ManualBookModal from '../components/dashboard/ManualBookModal';
 import AppointmentDetailModal from '../components/dashboard/AppointmentDetailModal';
 import { appointmentClientForAvatar } from '../lib/appointments';
 import { MASTER_SOCIAL_FIELDS } from '../lib/socialLinks';
+import { mediaUrl } from '../lib/media';
 import { RUSSIAN_TIMEZONES, DEFAULT_TIMEZONE } from '../lib/timezone';
 
 function buildScheduleDraft(apiSchedule) {
@@ -81,9 +83,17 @@ export default function MasterDashboard() {
   const [loadError, setLoadError] = useState('');
   const selectedSalonMasterIdRef = useRef(null);
   const loadGenRef = useRef(0);
-  const loadDataPromiseRef = useRef(null);
-  const mountedRef = useMountedRef();
   const [activeSection, setActiveSection] = useState(() => searchParams.get('section') || 'overview');
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const timer = window.setTimeout(() => {
+      logEvent('dashboard_stuck_loading', { section: activeSection });
+      dumpState({ section: activeSection, loadError: loadError || null });
+    }, 25000);
+    return () => window.clearTimeout(timer);
+  }, [loading, activeSection, loadError]);
+
   const [appointments, setAppointments] = useState([]);
   const [clients, setClients] = useState([]);
   const [profile, setProfile] = useState(null);
@@ -174,25 +184,39 @@ export default function MasterDashboard() {
   );
 
   const loadData = useCallback(async () => {
-    if (loadDataPromiseRef.current) return loadDataPromiseRef.current;
-
-    const promise = (async () => {
     const gen = ++loadGenRef.current;
     setLoadError('');
+    setLoading(true);
     try {
       const [appointmentsRes, clientsRes, linkRes] = await Promise.all([
         api.get('/appointments'),
         api.get('/master/me/clients'),
         api.get('/master/me/link')
       ]);
-      if (gen !== loadGenRef.current || !mountedRef.current) return;
+      if (gen !== loadGenRef.current) return;
       setAppointments(appointmentsRes.data);
       setClients(clientsRes.data);
       setLinks(linkRes.data.links);
-      setLoading(false);
+    } catch (err) {
+      if (gen !== loadGenRef.current) return;
+      console.error(err);
+      const timedOut = err?.code === 'ECONNABORTED';
+      const offline = !err?.response;
+      const message = timedOut
+        ? 'Сервер не отвечает. Проверьте интернет или попробуйте через Wi‑Fi.'
+        : offline
+          ? 'Нет связи с сервером. Проверьте интернет и обновите страницу.'
+          : 'Не удалось загрузить данные';
+      setLoadError(message);
+      toast(message, 'error');
+      return;
+    } finally {
+      if (gen === loadGenRef.current) setLoading(false);
+    }
 
+    try {
       await loadPortfolio();
-      if (gen !== loadGenRef.current || !mountedRef.current) return;
+      if (gen !== loadGenRef.current) return;
 
       if (isTeamMember && user?.salonMasterId) {
         setProfile({
@@ -210,7 +234,7 @@ export default function MasterDashboard() {
         api.get('/master/me/profile'),
         api.get('/master/me/salon-masters')
       ]);
-      if (gen !== loadGenRef.current || !mountedRef.current) return;
+      if (gen !== loadGenRef.current) return;
       const profileData = profileRes.data;
       const socialDefaults = Object.fromEntries(
         MASTER_SOCIAL_FIELDS.map((f) => [f.key, profileData[f.key] ?? ''])
@@ -226,28 +250,10 @@ export default function MasterDashboard() {
       selectedSalonMasterIdRef.current = teamId;
       if (teamId) await loadTeamScoped(teamId);
     } catch (err) {
-      if (gen !== loadGenRef.current || !mountedRef.current) return;
+      if (gen !== loadGenRef.current) return;
       console.error(err);
-      setLoading(false);
-      const timedOut = err?.code === 'ECONNABORTED';
-      const offline = !err?.response;
-      const message = timedOut
-        ? 'Сервер не отвечает. Проверьте интернет или попробуйте через Wi‑Fi.'
-        : offline
-          ? 'Нет связи с сервером. Проверьте интернет и обновите страницу.'
-          : 'Не удалось загрузить данные';
-      setLoadError(message);
-      toast(message, 'error');
     }
-    })();
-
-    loadDataPromiseRef.current = promise;
-    try {
-      await promise;
-    } finally {
-      if (loadDataPromiseRef.current === promise) loadDataPromiseRef.current = null;
-    }
-  }, [api, toast, loadTeamScoped, loadPortfolio, isTeamMember, user, mountedRef]);
+  }, [api, toast, loadTeamScoped, loadPortfolio, isTeamMember, user]);
 
   const handleTeamMasterChange = async (teamId) => {
     if (isTeamMember) return;
@@ -265,7 +271,6 @@ export default function MasterDashboard() {
       navigate('/login');
       return;
     }
-    setLoading(true);
     loadData();
     refreshNavBadges();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per login

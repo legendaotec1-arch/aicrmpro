@@ -9,11 +9,43 @@
           || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         if (window.__wonerIsIOS) document.documentElement.classList.add('ios-env');
 
-        window.__wonerBootError = function () {
+        window.__wonerBootReported = window.__wonerBootReported || {};
+        window.__wonerReportBootFailure = function (stage, extra) {
+          if (!stage || window.__wonerBootReported[stage]) return;
+          window.__wonerBootReported[stage] = 1;
+          var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+          var payload = JSON.stringify({
+            event: stage,
+            t: Date.now(),
+            path: location.pathname || '',
+            search: (location.search || '').slice(0, 200),
+            ua: (navigator.userAgent || '').slice(0, 160),
+            ios: !!window.__wonerIsIOS,
+            visible: document.visibilityState || '',
+            online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
+            conn: conn ? (conn.effectiveType || conn.type || '') : '',
+            ...(extra || {}),
+          });
+          try {
+            if (navigator.sendBeacon) {
+              navigator.sendBeacon('/api/logs/client', new Blob([payload], { type: 'application/json' }));
+            } else {
+              fetch('/api/logs/client', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true,
+              }).catch(function () {});
+            }
+          } catch (err) { /* ignore */ }
+        };
+
+        window.__wonerBootError = function (reason) {
+          window.__wonerReportBootFailure('BOOT_FAILED_UI', { reason: reason || 'unknown' });
           var root = document.getElementById('root');
           if (!root) return;
           root.innerHTML =
-            '<div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;text-align:center;color:#334155">' +
+            '<div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;text-align:center;color:#334155;background:#fff;min-height:100vh;box-sizing:border-box;padding-top:max(24px,env(safe-area-inset-top))">' +
             '<p style="font-size:18px;font-weight:600;margin:0 0 8px">Не удалось загрузить сайт</p>' +
             '<p style="font-size:14px;color:#64748b;margin:0 0 16px">Попробуйте обновить страницу</p>' +
             '<a href="' + (location.pathname || '/') + '?t=' + Date.now() + '" style="display:inline-block;padding:12px 24px;background:#6A5ACD;color:#fff;border-radius:12px;text-decoration:none;font-weight:600">Обновить</a>' +
@@ -21,15 +53,37 @@
         };
 
         window.addEventListener('error', function (e) {
-          var t = e.target;
-          if (!t || (t.tagName !== 'SCRIPT' && t.tagName !== 'LINK')) return;
-          var src = t.src || t.href || '';
-          if (/telegram-web-app/i.test(src)) return;
-          if (!/\/assets\//.test(src)) return;
           var root = document.getElementById('root');
           if (root && root.dataset.mounted === '1') return;
-          window.__wonerBootError();
+
+          var t = e.target;
+          if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+            var src = t.src || t.href || '';
+            if (/telegram-web-app/i.test(src)) return;
+            if (!/\/assets\//.test(src) && !/\/src\/main/.test(src)) return;
+            window.__wonerReportBootFailure('BOOT_ASSET_ERROR', { asset: src.slice(0, 240) });
+            window.__wonerBootError('asset');
+            return;
+          }
+
+          if (e.message) {
+            window.__wonerReportBootFailure('BOOT_JS_ERROR', {
+              message: String(e.message).slice(0, 240),
+              file: e.filename ? String(e.filename).slice(0, 120) : '',
+              line: e.lineno || 0,
+            });
+          }
         }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var root = document.getElementById('root');
+          if (root && root.dataset.mounted === '1') return;
+          var reason = e.reason;
+          var message = reason && (reason.message || String(reason)) || 'unhandledrejection';
+          window.__wonerReportBootFailure('BOOT_PROMISE_REJECT', {
+            message: String(message).slice(0, 240),
+          });
+        });
 
         var isMessengerPage = /^\/m\//.test(location.pathname || '') || /[?&]ch=(max|telegram)/.test(location.search || '');
         if (!isMessengerPage && 'serviceWorker' in navigator) {
@@ -53,7 +107,7 @@
     <link rel="icon" type="image/png" href="/images/favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/png" href="/images/favicon-48x48.jpg" sizes="48x48" />
     <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="apple-mobile-web-app-title" content="Woner.ru" />
 
     <script>
@@ -262,21 +316,34 @@
     </script>
 
   </head>
-  <body>
+  <body style="margin:0;background:#fff">
     <noscript>
       <div><img src="https://mc.yandex.ru/watch/110082756" style="position:absolute; left:-9999px;" alt="" /></div>
     </noscript>
     <div id="root">
-      <div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;color:#334155;text-align:center">
+      <div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;color:#334155;text-align:center;background:#fff;min-height:100vh;box-sizing:border-box;padding-top:max(24px,env(safe-area-inset-top))">
         Загрузка Woner.ru…
       </div>
     </div>
     <script>
-      window.setTimeout(function () {
-        var root = document.getElementById('root');
-        if (!root || root.dataset.mounted === '1') return;
-        window.__wonerBootError();
-      }, window.__wonerIsIOS ? 45000 : 30000);
+      (function () {
+        var ios = !!window.__wonerIsIOS;
+        var timeoutMs = ios ? 45000 : 30000;
+        var pingMs = ios ? 20000 : 12000;
+
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.dataset.mounted === '1') return;
+          window.__wonerReportBootFailure('BOOT_STILL_LOADING', { waitedMs: pingMs });
+        }, pingMs);
+
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.dataset.mounted === '1') return;
+          window.__wonerReportBootFailure('BOOT_TIMEOUT', { waitedMs: timeoutMs });
+          window.__wonerBootError('timeout');
+        }, timeoutMs);
+      })();
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

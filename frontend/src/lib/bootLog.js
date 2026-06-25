@@ -17,7 +17,7 @@ export function bootLog(stage, extra = {}) {
 
   try {
     const payload = JSON.stringify({
-      stage,
+      event: stage,
       t: Date.now(),
       path: typeof location !== 'undefined' ? location.pathname : '',
       search: typeof location !== 'undefined' ? location.search?.slice(0, 200) : '',
@@ -25,10 +25,10 @@ export function bootLog(stage, extra = {}) {
       ...extra,
     });
     if (navigator.sendBeacon) {
-      navigator.sendBeacon('/api/debug-log', new Blob([payload], { type: 'application/json' }));
+      navigator.sendBeacon('/api/logs/client', new Blob([payload], { type: 'application/json' }));
       return;
     }
-    fetch('/api/debug-log', {
+    fetch('/api/logs/client', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: payload,

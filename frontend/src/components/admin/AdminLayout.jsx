@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard,
   KanbanSquare,
+  Briefcase,
   FolderOpen,
   Wallet,
   KeyRound,
@@ -17,6 +18,7 @@ import BrandName from '../brand/BrandName';
 const TABS = [
   { id: 'overview', label: 'Сводка', icon: LayoutDashboard },
   { id: 'tasks', label: 'Задачи', icon: KanbanSquare },
+  { id: 'crm', label: 'Рабочий стол', icon: Briefcase },
   { id: 'drive', label: 'Облако', icon: FolderOpen },
   { id: 'finance', label: 'Финансы', icon: Wallet },
   { id: 'ads', label: 'Реклама', icon: Megaphone },

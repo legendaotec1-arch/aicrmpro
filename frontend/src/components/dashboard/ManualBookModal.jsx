@@ -408,6 +408,7 @@ export default function ManualBookModal({
       title="Новая запись"
       description={summaryParts.length ? summaryParts.join(' · ') : 'Услуга, дата, время и клиент'}
       size="lg"
+      mobileFullScreen
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-admin-textMuted">{footerHint}</p>

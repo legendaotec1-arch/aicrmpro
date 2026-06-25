@@ -50,6 +50,7 @@ import { mediaUrl } from '../lib/media';
 import { getClientSession, setClientSession, clearClientSession, clientSessionKeys, parseClientTokenParam, isClientSessionValid } from '../lib/clientSession';
 import { withClientAuth } from '../lib/clientApi';
 import { bootLog } from '../lib/bootLog';
+import { retryLoad } from '../lib/retryLoad';
 import { useSafeInterval, useMountedRef } from '../lib/usePageVisible';
 import { useLeadingThrottle } from '../lib/useThrottledCallback';
 import { iosBackdropFilter, iosScrollBehavior } from '../lib/iosPerf';
@@ -68,7 +69,7 @@ import {
   openBookingInSystemBrowser,
 } from '../lib/messengerWebApp';
 
-const BookingDateCalendar = lazy(() => import('../components/client/BookingDateCalendar'));
+const BookingDateCalendar = lazy(() => retryLoad(() => import('../components/client/BookingDateCalendar')));
 
 // ============================================================
 // PREMIUM iOS DESIGN TOKENS — INLINE STYLES

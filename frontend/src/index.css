@@ -207,6 +207,22 @@
     padding-top: max(env(safe-area-inset-top), 0px);
   }
 
+  /* Кабинет мастера — отступы под шапку и нижнюю панель на iPhone */
+  .dashboard-mobile-header-offset {
+    padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));
+  }
+  .dashboard-mobile-main {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px) + var(--mobile-vv-bottom, var(--ios-vv-bottom, 0px)) + 1rem);
+  }
+  .dashboard-mobile-tabbar {
+    bottom: var(--mobile-vv-bottom, var(--ios-vv-bottom, 0px));
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+  html.ios-env .modal-backdrop-blur {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
   /* Клиентская страница — темы через CSS-переменные (--ct-*) */
   .client-shell {
     background-color: var(--ct-bg, #fffbf7);

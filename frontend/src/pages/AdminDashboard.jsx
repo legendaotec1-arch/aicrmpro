@@ -14,6 +14,7 @@ import AdminAdsTab from '../components/admin/AdminAdsTab';
 import AdminVaultTab from '../components/admin/AdminVaultTab';
 import AdminSeoTab from '../components/admin/AdminSeoTab';
 import AdminPartnersTab from '../components/admin/AdminPartnersTab';
+import AdminCrmTab from '../components/admin/AdminCrmTab';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -100,6 +101,7 @@ export default function AdminDashboard() {
         <AdminOverviewTab overview={overview} masters={masters} payments={payments} />
       ) : null}
       {tab === 'tasks' ? <AdminTasksTab onUnreadTotal={setTasksUnread} /> : null}
+      {tab === 'crm' ? <AdminCrmTab /> : null}
       {tab === 'drive' ? <AdminDriveTab /> : null}
       {tab === 'finance' ? <AdminFinanceTab /> : null}
       {tab === 'ads' ? <AdminAdsTab /> : null}

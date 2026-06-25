@@ -46,5 +46,18 @@ export default defineConfig({
     base: '/',
     target: 'safari14',
     modulePreload: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@sentry')) return 'sentry';
+          if (id.includes('react-router')) return 'react-router';
+          if (id.includes('axios')) return 'axios';
+          if (id.includes('leaflet')) return 'leaflet';
+          if (id.includes('moment')) return 'moment';
+          return 'vendor';
+        },
+      },
+    },
   }
 })

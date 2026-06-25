@@ -1,6 +1,10 @@
+// Load environment variables before Sentry
+require('dotenv').config();
+require('./instrument');
+
 const express = require('express');
+const Sentry = require('@sentry/node');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 const { uploadsDir, frontendDist } = require('./config/paths');
@@ -17,15 +21,13 @@ const {
 const { sendSpaIndexWithSeo } = require('./seo/spaSeo');
 const { registerIndexNowKeyRoute } = require('./seo/indexNow');
 
-// Load environment variables
-dotenv.config();
-
 const { assertSecurityEnv } = require('./utils/jwtConfig');
 if (process.env.NODE_ENV === 'production') {
   assertSecurityEnv();
 }
 
 const { createCorsOriginChecker } = require('./utils/corsOrigins');
+const { requestLogMiddleware } = require('./middleware/requestLog');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,6 +46,10 @@ async function cleanupPastScheduleExceptionsOnStartup() {
   }
 }
 
+// Sentry tunnel — события идут через woner.ru (ingest.us.sentry.io часто блокируется в РФ)
+const { sentryTunnelHandler, readRawBody } = require('./routes/sentryTunnel');
+app.post('/api/sentry-tunnel', readRawBody, sentryTunnelHandler);
+
 // Middleware
 app.use(cors({
   origin: createCorsOriginChecker(),
@@ -51,6 +57,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(requestLogMiddleware);
 
 // Static files for uploads; missing files → 404 (не index.html SPA)
 app.use('/uploads', express.static(uploadsDir, {
@@ -81,6 +88,8 @@ const appointmentRoutes = require('./routes/appointment');
 const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const partnerRoutes = require('./routes/partner');
+const logsRoutes = require('./routes/logs');
+const { pushClientLog } = require('./utils/clientLogStore');
 
 // SEO seed on startup
 async function initSeo() {
@@ -159,6 +168,7 @@ app.use('/api/client', clientRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/partner', partnerRoutes);
+app.use('/api/logs', logsRoutes);
 app.use('/api/seo', seoApiRouter);
 
 app.get('/r/:code', (req, res) => {
@@ -224,29 +234,72 @@ app.get('/blog/feed.xml', async (_req, res) => {
   }
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check (UptimeRobot / cron: https://woner.ru/api/health)
+app.get('/api/health', async (req, res) => {
+  const out = {
+    status: 'ok',
+    service: 'woner-backend',
+    timestamp: new Date().toISOString(),
+    uptime: Math.round(process.uptime()),
+    memory: {
+      rss: process.memoryUsage().rss,
+      heapUsed: process.memoryUsage().heapUsed,
+    },
+  };
+  try {
+    const db = require('./config/database');
+    await db.query('SELECT 1');
+    out.db = 'ok';
+  } catch (err) {
+    out.status = 'degraded';
+    out.db = 'error';
+    return res.status(503).json(out);
+  }
+  res.json(out);
 });
 
-// Диагностика старта booking в TG/MAX WebView (этапы BOOKING_HTML_LOADED, MAIN_JS_STARTED, …)
+app.get('/api/health/db', async (req, res) => {
+  try {
+    const db = require('./config/database');
+    await db.query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ status: 'error', db: 'disconnected', error: err.message });
+  }
+});
+
+// Диагностика старта (legacy → также в clientLogStore)
 app.post('/api/debug-log', (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const stage = String(body.stage || '').slice(0, 64);
   if (!stage) return res.status(400).json({ error: 'stage required' });
   const line = {
-    stage,
-    t: body.t || Date.now(),
+    event: stage,
+    clientTime: body.t || Date.now(),
     path: body.path,
     search: body.search ? String(body.search).slice(0, 120) : undefined,
-    ua: body.ua ? String(body.ua).slice(0, 80) : undefined,
+    ua: body.ua ? String(body.ua).slice(0, 160) : undefined,
     ip: req.ip,
-    ...(body.masterId ? { masterId: String(body.masterId).slice(0, 64) } : {}),
-    ...(body.status != null ? { status: body.status } : {}),
-    ...(body.count != null ? { count: body.count } : {}),
-    ...(body.mode ? { mode: body.mode } : {}),
+    serverTime: new Date().toISOString(),
+    ios: body.ios != null ? Boolean(body.ios) : undefined,
+    online: body.online != null ? Boolean(body.online) : undefined,
+    visible: body.visible ? String(body.visible).slice(0, 16) : undefined,
+    reason: body.reason ? String(body.reason).slice(0, 64) : undefined,
+    asset: body.asset ? String(body.asset).slice(0, 240) : undefined,
+    message: body.message ? String(body.message).slice(0, 240) : undefined,
+    waitedMs: body.waitedMs != null ? body.waitedMs : undefined,
+    data: {
+      ...(body.masterId ? { masterId: String(body.masterId).slice(0, 64) } : {}),
+      ...(body.status != null ? { status: body.status } : {}),
+      ...(body.count != null ? { count: body.count } : {}),
+      ...(body.mode ? { mode: body.mode } : {}),
+      ...(body.file ? { file: String(body.file).slice(0, 120), line: body.line } : {}),
+      ...(body.conn ? { conn: String(body.conn).slice(0, 16) } : {}),
+    },
   };
-  console.log('[client-boot]', JSON.stringify(line));
+  pushClientLog(line);
+  const tag = stage.startsWith('BOOT_') ? '[client-boot-fail]' : '[client-boot]';
+  console.log(tag, JSON.stringify(line));
   res.json({ ok: true });
 });
 
@@ -309,6 +362,10 @@ app.get('*', (req, res) => {
   }
   sendSpaIndexWithSeo(res, path.join(frontendDist, 'index.html'), req.path);
 });
+
+if ((process.env.SENTRY_DSN || '').trim()) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {

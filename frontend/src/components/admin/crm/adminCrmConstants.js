@@ -1,16 +1,3 @@
-export const CRM_SHEETS = [
-  { id: 'instruction', label: 'Инструкция' },
-  { id: 'main', label: 'Основной' },
-  { id: 'scripts', label: 'Скрипты' },
-  { id: 'answers', label: 'Ответы' },
-  { id: 'followup', label: 'Дожим' },
-  { id: 'analytics', label: 'Аналитика' },
-  { id: 'search', label: 'Поиск' },
-  { id: 'schedule', label: 'Расписание' },
-  { id: 'checklist', label: 'Чек-лист' },
-  { id: 'rules', label: 'Правила' },
-];
-
 /** Популярные площадки в РФ для холодных продаж */
 export const CRM_PLATFORMS = [
   'Instagram',
@@ -44,17 +31,6 @@ export const PLATFORM_COLORS = {
   Другое: 'bg-slate-100 text-slate-700',
 };
 
-export const LEAD_COLUMNS = [
-  { key: 'lead_date', label: 'Дата', type: 'date', minWidth: 130 },
-  { key: 'platform', label: 'Платформа', type: 'platform', minWidth: 140 },
-  { key: 'contact', label: 'Контакт', type: 'text', minWidth: 160, placeholder: '@username' },
-  { key: 'name', label: 'Имя', type: 'text', minWidth: 140 },
-  { key: 'city', label: 'Город', type: 'text', minWidth: 120 },
-  { key: 'niche', label: 'Ниша', type: 'text', minWidth: 140, placeholder: 'маникюр, барбер…' },
-  { key: 'status', label: 'Статус', type: 'status', minWidth: 130 },
-  { key: 'note', label: 'Примечание', type: 'textarea', minWidth: 200 },
-];
-
 export const STATUS_COLORS = {
   'Новый': 'bg-blue-100 text-blue-900 border-blue-200',
   'Отправлено': 'bg-yellow-100 text-yellow-900 border-yellow-200',
@@ -67,11 +43,16 @@ export const STATUS_COLORS = {
   'Неактивен': 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
-export const SCRIPT_HEADERS = ['№', 'Для кого', 'Название', 'Текст сообщения'];
-export const ANSWER_HEADERS = ['Что сказал клиент', 'Ваш ответ'];
-export const SEARCH_HEADERS = ['Способ поиска', 'Где искать', 'Пример запроса'];
+export const CRM_STATUSES = Object.keys(STATUS_COLORS);
 
 export const NICHE_SUGGESTIONS = [
   'Маникюр', 'Педикюр', 'Брови', 'Ресницы', 'Барбер', 'Парикмахер',
   'Косметолог', 'Массаж', 'Салон', 'Тату', 'Фитнес', 'Другое',
+];
+
+export const GUIDE_SECTIONS = [
+  { id: 'instruction', label: 'Принципы', emoji: '📌' },
+  { id: 'schedule', label: 'Расписание дня', emoji: '⏰' },
+  { id: 'checklist', label: 'Чек-лист', emoji: '✅' },
+  { id: 'rules', label: '10 правил', emoji: '📋' },
 ];

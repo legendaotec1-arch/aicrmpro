@@ -28,8 +28,6 @@ export default function AppointmentsSection({
           icon="◷"
           title="Активных записей нет"
           description="Новые записи появятся после бронирования по ссылке или ручного добавления"
-          actionLabel="Записать клиента"
-          onAction={onManualBook}
         />
       </Card>
     );

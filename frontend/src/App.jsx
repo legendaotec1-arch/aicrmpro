@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './lib/http.js';
+import { retryLoad } from './lib/retryLoad.js';
+import { Sentry } from './instrument.js';
 import { clearToken, getToken, saveToken } from './lib/authStorage.js';
 import { clearAdminToken, getAdminToken } from './lib/adminStorage.js';
 import adminApi from './lib/adminApi.js';
@@ -8,7 +10,7 @@ import { ToastProvider } from './context/ToastContext';
 import { PageLoader } from './components/ui/Spinner';
 
 import LandingPage from './pages/LandingPage';
-const ClientPage = lazy(() => import('./pages/ClientPage'));
+const ClientPage = lazy(() => retryLoad(() => import('./pages/ClientPage')));
 import MasterLogin from './pages/MasterLogin';
 import MasterRegister from './pages/MasterRegister';
 import MasterDashboard from './pages/MasterDashboard';
@@ -59,8 +61,14 @@ function AuthProvider({ children }) {
   const verifyToken = async () => {
     try {
       const res = await api.get('/auth/verify');
-      if (res.data.valid) setUser(res.data.master);
-      else clearToken();
+      if (res.data.valid) {
+        setUser(res.data.master);
+        Sentry.setUser({
+          id: res.data.master?.id,
+          email: res.data.master?.email,
+          username: res.data.master?.salon_name || res.data.master?.name,
+        });
+      } else clearToken();
     } catch {
       clearToken();
     } finally {
@@ -82,6 +90,11 @@ function AuthProvider({ children }) {
     });
     saveToken(res.data.token);
     setUser(res.data.master);
+    Sentry.setUser({
+      id: res.data.master?.id,
+      email: res.data.master?.email,
+      username: res.data.master?.salon_name || res.data.master?.name,
+    });
     return res.data;
   };
 
@@ -91,6 +104,7 @@ function AuthProvider({ children }) {
   const logout = () => {
     clearToken();
     setUser(null);
+    Sentry.setUser(null);
   };
 
   return (
