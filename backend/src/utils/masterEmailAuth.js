@@ -63,8 +63,8 @@ async function sendMasterVerificationCode(email, { purpose, payload = null }) {
   );
 
   const actionLabel = purpose === 'register' ? 'регистрации в Woner.ru' : 'входа в кабинет мастера Woner.ru';
-
-  const sent = await sendMail({
+  const smtpConfigured = isEmailConfigured();
+  const mailPayload = {
     to: normalized,
     subject: `Woner.ru — код для ${purpose === 'register' ? 'регистрации' : 'входа'}`,
     text: [
@@ -84,12 +84,27 @@ async function sendMasterVerificationCode(email, { purpose, payload = null }) {
         <p style="font-size:32px;font-weight:700;letter-spacing:6px;color:#1e293b;margin:24px 0">${code}</p>
         <p style="color:#64748b;font-size:14px">Код действует ${CODE_TTL_MINUTES} минут.</p>
       </div>`,
+  };
+
+  if (!smtpConfigured) {
+    return {
+      sent: false,
+      devCode: process.env.NODE_ENV !== 'production' ? code : undefined,
+      smtpConfigured: false,
+    };
+  }
+
+  // Ответ API сразу — письмо уходит в фоне (медленный SMTP не блокирует вход/регистрацию)
+  setImmediate(() => {
+    sendMail(mailPayload).then((ok) => {
+      if (!ok) console.error(`[email] Не удалось отправить код на ${normalized}`);
+    });
   });
 
   return {
-    sent,
-    devCode: process.env.NODE_ENV !== 'production' ? code : (sent ? undefined : code),
-    smtpConfigured: isEmailConfigured(),
+    sent: true,
+    devCode: process.env.NODE_ENV !== 'production' ? code : undefined,
+    smtpConfigured: true,
   };
 }
 

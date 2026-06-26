@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApi from '../lib/adminApi';
 import { clearAdminToken } from '../lib/adminStorage';
+import { ensureFreshAdminBundle } from '../lib/adminBundleCheck';
+import { useSafeInterval } from '../lib/usePageVisible';
 import { PageLoader } from '../components/ui/Spinner';
 import AdminLayout, { useAdminTab } from '../components/admin/AdminLayout';
 import AdminOverviewTab from '../components/admin/AdminOverviewTab';
@@ -12,6 +14,7 @@ import AdminAdsTab from '../components/admin/AdminAdsTab';
 import AdminVaultTab from '../components/admin/AdminVaultTab';
 import AdminSeoTab from '../components/admin/AdminSeoTab';
 import AdminPartnersTab from '../components/admin/AdminPartnersTab';
+import AdminCrmTab from '../components/admin/AdminCrmTab';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -22,6 +25,26 @@ export default function AdminDashboard() {
   const [overview, setOverview] = useState(null);
   const [masters, setMasters] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [tasksUnread, setTasksUnread] = useState(0);
+
+  useEffect(() => {
+    ensureFreshAdminBundle();
+  }, []);
+
+  const refreshTasksUnread = useCallback(async () => {
+    try {
+      const res = await adminApi.get('/tasks/unread-total');
+      setTasksUnread(Number(res.data?.total ?? 0));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshTasksUnread();
+  }, [refreshTasksUnread, tab]);
+
+  useSafeInterval(refreshTasksUnread, 30000, tab !== 'tasks');
 
   const loadOverview = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -66,6 +89,7 @@ export default function AdminDashboard() {
       onRefresh={tab === 'overview' ? () => loadOverview(true) : undefined}
       refreshing={refreshing}
       onLogout={logout}
+      tasksUnread={tasksUnread}
     >
       {error && tab === 'overview' ? (
         <div className="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -76,7 +100,8 @@ export default function AdminDashboard() {
       {tab === 'overview' ? (
         <AdminOverviewTab overview={overview} masters={masters} payments={payments} />
       ) : null}
-      {tab === 'tasks' ? <AdminTasksTab /> : null}
+      {tab === 'tasks' ? <AdminTasksTab onUnreadTotal={setTasksUnread} /> : null}
+      {tab === 'crm' ? <AdminCrmTab /> : null}
       {tab === 'drive' ? <AdminDriveTab /> : null}
       {tab === 'finance' ? <AdminFinanceTab /> : null}
       {tab === 'ads' ? <AdminAdsTab /> : null}

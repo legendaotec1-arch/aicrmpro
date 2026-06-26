@@ -4,6 +4,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { formatServicePrice } from '../../lib/format';
+import { getServiceNameError } from '../../lib/serviceName';
 import { mediaUrl } from '../../lib/media';
 
 const PRICE_TYPES = [
@@ -46,6 +47,8 @@ export default function ServicePriceModal({
           ? 'От, ₽'
           : 'Цена, ₽';
 
+  const nameError = form.name ? getServiceNameError(form.name) : null;
+
   return (
     <Modal
       open={open}
@@ -57,7 +60,7 @@ export default function ServicePriceModal({
           <Button variant="secondary" onClick={onClose} disabled={saving}>
             Отмена
           </Button>
-          <Button type="submit" form="price-form" loading={saving}>
+          <Button type="submit" form="price-form" loading={saving} disabled={Boolean(nameError)}>
             Сохранить
           </Button>
         </>
@@ -103,6 +106,7 @@ export default function ServicePriceModal({
               label="Название"
               required
               value={form.name}
+              error={nameError}
               onChange={(e) => onChange({ name: e.target.value })}
             />
           </div>

@@ -22,9 +22,15 @@ export const SITE_LEGAL = {
   },
   privacyEmail: 'e.rupasov@yandex.ru',
   supportTelegram: 'https://t.me/legendabrabus',
-  documentsVersion: '24.05.2026',
-  privacyPolicyEffectiveDate: '14.05.2025',
+  documentsVersion: '26.06.2026',
+  privacyPolicyEffectiveDate: '26.06.2026',
+  personalDataConsentEffectiveDate: '01.09.2025',
+  personalDataConsentPath: '/legal/personal-data-consent',
   paymentPolicyEffectiveDate: '14.05.2025',
+  /** Полный текст — только на страницах /legal/* */
   metaDisclaimer:
-    'Компания Meta Platforms Inc., а также принадлежащие ей социальные сети Instagram и Facebook, признаны экстремистскими организациями; деятельность Meta Platforms Inc. по реализации продуктов Instagram и Facebook на территории Российской Федерации запрещена. Упоминание Instagram на сайте сервиса Woner.ru не является рекламой социальной сети и означает только техническую возможность поделиться ссылкой на онлайн-запись. Woner.ru не связан с Meta Platforms Inc., не одобрен ею и не предоставляет услуги от её имени.'
+    'Компания Meta Platforms Inc., а также принадлежащие ей социальные сети Instagram и Facebook, признаны экстремистскими организациями; деятельность Meta Platforms Inc. по реализации продуктов Instagram и Facebook на территории Российской Федерации запрещена. Упоминание Instagram на сайте сервиса Woner.ru не является рекламой социальной сети и означает только техническую возможность поделиться ссылкой на онлайн-запись. Woner.ru не связан с Meta Platforms Inc., не одобрен ею и не предоставляет услуги от её имени.',
+  /** Короткая пометка в подвале — не для сниппета в поиске */
+  instagramFooterNote:
+    'Упоминание Instagram* на сайте — только о возможности поделиться ссылкой на онлайн-запись, не реклама соцсети.',
 };

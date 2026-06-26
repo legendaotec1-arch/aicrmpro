@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const db = require('../config/database');
 const { uploadsDir } = require('../config/paths');
 
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done'];
@@ -94,6 +95,46 @@ const AD_STATUSES = ['new', 'contacted', 'negotiating', 'agreed', 'paid', 'rejec
 const AD_PLATFORMS = ['telegram', 'instagram', 'youtube', 'vk', 'tiktok', 'blog', 'other'];
 const AD_PRIORITIES = ['low', 'normal', 'high'];
 
+let taskReadSchemaReady = false;
+
+async function ensureTaskReadSchema() {
+  if (taskReadSchemaReady) return;
+  const sqlPath = path.join(__dirname, '../db/migrations/046_admin_task_comment_reads.sql');
+  const sql = fs.readFileSync(sqlPath, 'utf8');
+  await db.query(sql);
+  taskReadSchemaReady = true;
+}
+
+async function markTaskCommentsRead(taskId, adminEmail) {
+  const email = String(adminEmail || '').trim().toLowerCase();
+  if (!taskId || !email) return;
+  await ensureTaskReadSchema();
+  await db.query(
+    `INSERT INTO admin_task_read_state (task_id, admin_email, last_read_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (task_id, admin_email) DO UPDATE SET last_read_at = NOW()`,
+    [taskId, email]
+  );
+}
+
+async function countAllUnreadComments(adminEmail) {
+  const email = String(adminEmail || '').trim().toLowerCase();
+  if (!email) return 0;
+  await ensureTaskReadSchema();
+  const result = await db.query(
+    `SELECT COUNT(*)::int AS total
+     FROM admin_task_comments c
+     WHERE LOWER(c.created_by) <> $1
+       AND c.created_at > COALESCE(
+         (SELECT r.last_read_at FROM admin_task_read_state r
+          WHERE r.task_id = c.task_id AND LOWER(r.admin_email) = $1),
+         'epoch'::timestamptz
+       )`,
+    [email]
+  );
+  return Number(result.rows[0]?.total ?? 0);
+}
+
 function mapTaskRow(row) {
   return {
     ...row,
@@ -101,6 +142,7 @@ function mapTaskRow(row) {
     created_by_name: displayNameForEmail(row.created_by),
     comment_count: Number(row.comment_count ?? 0),
     attachment_count: Number(row.attachment_count ?? 0),
+    unread_comment_count: Number(row.unread_comment_count ?? 0),
   };
 }
 
@@ -166,4 +208,7 @@ module.exports = {
   mapTaskRow,
   mapTaskCommentRow,
   mapTaskAttachmentRow,
+  ensureTaskReadSchema,
+  markTaskCommentsRead,
+  countAllUnreadComments,
 };

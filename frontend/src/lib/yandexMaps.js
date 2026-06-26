@@ -56,6 +56,11 @@ export async function createPlacemarkMap(container, { latitude, longitude, zoom 
     controls: ['zoomControl']
   });
 
+  if (!map?.geoObjects?.add) {
+    destroyMap(map);
+    throw new Error('Yandex map geoObjects unavailable');
+  }
+
   map.geoObjects.add(
     new ymaps.Placemark([lat, lon], {}, { preset: 'islands#redDotIcon' })
   );

@@ -5,7 +5,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> Build frontend → frontend/dist/"
-(cd frontend && npm run build)
+if [ -f "$ROOT/.env" ]; then
+  # Vite подхватывает VITE_* только на этапе сборки
+  while IFS= read -r line; do
+    case "$line" in VITE_SENTRY_*=*) export "$line" ;; esac
+  done < <(grep -E '^VITE_SENTRY_' "$ROOT/.env" 2>/dev/null || true)
+fi
+(cd frontend && BUILD_ID="$(date +%s)" npm run build)
 
 if [ ! -f frontend/dist/index.html ]; then
   echo "ERROR: frontend/dist/index.html не создан"

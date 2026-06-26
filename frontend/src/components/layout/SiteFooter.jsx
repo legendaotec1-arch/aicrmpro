@@ -7,7 +7,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import Logo from '../brand/Logo';
-import BrandName, { RichBrandText } from '../brand/BrandName';
+import BrandName from '../brand/BrandName';
 import ScrollToSectionLink from './ScrollToSectionLink';
 import { SITE_LEGAL } from '../../config/siteLegal';
 
@@ -20,7 +20,8 @@ const TRUST = [
 
 const LEGAL_LINKS = [
   { to: '/legal/offer', label: 'Договор оферты' },
-  { to: '/legal/privacy', label: 'Персональные данные' },
+  { to: '/legal/privacy', label: 'Политика ПДн' },
+  { to: '/legal/personal-data-consent', label: 'Согласие на ПДн' },
   { to: '/legal/payment', label: 'Оплата и возврат' }
 ];
 
@@ -106,13 +107,17 @@ export default function SiteFooter({ compact = false }) {
 
             <div className="mt-10 border-t border-slate-800 pt-8">
               <p className="text-xs leading-relaxed text-slate-500">
-                Используя сервис <BrandName className="text-slate-400" />, вы подтверждаете ознакомление с{' '}
+                Используя сервис <BrandName className="text-slate-400" tldClassName="text-white" />, вы подтверждаете ознакомление с{' '}
                 <Link to="/legal/offer" className="text-slate-400 underline-offset-2 hover:text-slate-300 hover:underline">
                   договором оферты
                 </Link>
                 ,{' '}
                 <Link to="/legal/privacy" className="text-slate-400 underline-offset-2 hover:text-slate-300 hover:underline">
                   политикой обработки персональных данных
+                </Link>
+                ,{' '}
+                <Link to="/legal/personal-data-consent" className="text-slate-400 underline-offset-2 hover:text-slate-300 hover:underline">
+                  согласием на обработку персональных данных
                 </Link>{' '}
                 и{' '}
                 <Link to="/legal/payment" className="text-slate-400 underline-offset-2 hover:text-slate-300 hover:underline">
@@ -120,18 +125,21 @@ export default function SiteFooter({ compact = false }) {
                 </Link>
                 . Сервис предназначен для самозанятых, ИП и юридических лиц, оказывающих услуги клиентам (B2B).
               </p>
-              <p className="mt-4 text-xs leading-relaxed text-slate-500">
+              <p className="mt-4 text-xs leading-relaxed text-slate-500" data-nosnippet>
                 <span className="font-semibold text-slate-400">* </span>
-                <RichBrandText text={SITE_LEGAL.metaDisclaimer} brandClassName="text-slate-400" />
+                {SITE_LEGAL.instagramFooterNote}{' '}
+                <Link to="/legal/privacy" className="text-slate-400 underline-offset-2 hover:text-slate-300 hover:underline">
+                  Подробнее
+                </Link>
               </p>
             </div>
           </>
         )}
 
         {compact && (
-          <p className="mb-6 text-xs leading-relaxed text-slate-500">
+          <p className="mb-6 text-xs leading-relaxed text-slate-500" data-nosnippet>
             <span className="font-semibold text-slate-400">* </span>
-            <RichBrandText text={SITE_LEGAL.metaDisclaimer} brandClassName="text-slate-400" />
+            {SITE_LEGAL.instagramFooterNote}
           </p>
         )}
 
@@ -142,7 +150,7 @@ export default function SiteFooter({ compact = false }) {
         >
           <div className="space-y-1">
             <p>
-              © {year} <BrandName className="text-slate-400" />
+              © {year} <BrandName className="text-slate-400" tldClassName="text-white" />
             </p>
             <p className="text-slate-500">{SITE_LEGAL.footerRequisites}</p>
             <p className="text-slate-500">Адрес: {SITE_LEGAL.legalAddress}</p>

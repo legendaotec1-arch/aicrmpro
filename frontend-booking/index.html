@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          console.log('[woner-boot] BOOKING_HTML_LOADED');
+          var p = JSON.stringify({
+            stage: 'BOOKING_HTML_LOADED',
+            t: Date.now(),
+            path: location.pathname,
+            search: (location.search || '').slice(0, 200),
+            ua: (navigator.userAgent || '').slice(0, 160),
+          });
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon('/api/debug-log', new Blob([p], { type: 'application/json' }));
+          } else {
+            fetch('/api/debug-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: p, keepalive: true }).catch(function () {});
+          }
+        } catch (e) { /* ignore */ }
+
+        if (/[?&]_router=hash\b/.test(location.search || '') && !/^#\//.test(location.hash || '')) {
+          location.hash = (location.pathname || '/') + (location.search || '');
+        }
+
+        window.__wonerBootError = function () {
+          var root = document.getElementById('root');
+          if (!root) return;
+          root.innerHTML =
+            '<div style="padding:24px;font-family:system-ui,sans-serif;text-align:center;color:#334155">' +
+            '<p style="font-size:18px;font-weight:600">Не удалось загрузить запись</p>' +
+            '<p style="font-size:14px;color:#64748b">Откройте ссылку в Safari или Chrome</p>' +
+            '<a href="' + (location.pathname || '/') + location.search + '" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6A5ACD;color:#fff;border-radius:12px;text-decoration:none;font-weight:600">Обновить</a>' +
+            '</div>';
+        };
+
+        window.addEventListener('pageshow', function (e) {
+          if (e.persisted) {
+            var root = document.getElementById('root');
+            if (!root || root.dataset.mounted !== '1') location.reload();
+          }
+        });
+
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          if (!t || (t.tagName !== 'SCRIPT' && t.tagName !== 'LINK')) return;
+          var src = t.src || t.href || '';
+          if (/telegram-web-app/i.test(src)) return;
+          if (!/\/booking-assets\//.test(src) && !/\/assets\//.test(src)) return;
+          var root = document.getElementById('root');
+          if (root && root.dataset.mounted === '1') return;
+          window.__wonerBootError();
+        }, true);
+
+        var ua = navigator.userAgent || '';
+        if (/Telegram/i.test(ua) && !/[?&]ch=max\b/.test(location.search || '')) {
+          var tgScript = document.createElement('script');
+          tgScript.async = true;
+          tgScript.src = '/telegram-web-app.js';
+          tgScript.onerror = function () {};
+          tgScript.onload = function () {
+            try {
+              var tg = window.Telegram && window.Telegram.WebApp;
+              if (tg) { tg.ready(); tg.expand(); }
+            } catch (e) {}
+          };
+          document.head.appendChild(tgScript);
+        }
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>Запись — Woner.ru</title>
+  </head>
+  <body>
+    <div id="root">
+      <div style="padding:24px;font-family:system-ui,sans-serif;color:#334155;text-align:center">
+        Загрузка записи…
+      </div>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

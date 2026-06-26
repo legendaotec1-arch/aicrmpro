@@ -5,6 +5,7 @@ import { savePartnerToken } from '../../lib/partnerStorage';
 import AuthLayout from '../../components/layout/AuthLayout';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
+import PersonalDataConsentCheckbox from '../../components/legal/PersonalDataConsentCheckbox';
 
 export default function PartnerRegister() {
   const navigate = useNavigate();
@@ -14,6 +15,8 @@ export default function PartnerRegister() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [pdConsent, setPdConsent] = useState(false);
   const [devCode, setDevCode] = useState('');
 
   const submitRegister = async (e) => {
@@ -86,7 +89,13 @@ export default function PartnerRegister() {
         <Input label="Телефон" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Необязательно" />
         <Input label="Пароль" type="password" required minLength={6} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         <label className="flex gap-3 text-sm text-ink-secondary">
-          <input type="checkbox" required className="mt-1 h-4 w-4 rounded border-slate-300 text-primary" />
+          <input
+            type="checkbox"
+            checked={termsAccepted}
+            onChange={(e) => setTermsAccepted(e.target.checked)}
+            required
+            className="mt-1 h-4 w-4 rounded border-slate-300 text-primary"
+          />
           <span>
             Принимаю{' '}
             <a href="/api/partner/offer/public" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">
@@ -95,7 +104,8 @@ export default function PartnerRegister() {
             и подтверждаю, что самостоятельно уплачиваю налоги с вознаграждения
           </span>
         </label>
-        <Button type="submit" className="w-full" size="lg" loading={loading}>
+        <PersonalDataConsentCheckbox checked={pdConsent} onChange={setPdConsent} variant="partner" id="partner-pd-consent" />
+        <Button type="submit" className="w-full" size="lg" loading={loading} disabled={!termsAccepted || !pdConsent}>
           Зарегистрироваться
         </Button>
       </form>

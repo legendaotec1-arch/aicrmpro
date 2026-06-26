@@ -5,6 +5,8 @@ import AuthLayout from '../components/layout/AuthLayout';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import api from '../lib/http';
+import PersonalDataConsentCheckbox from '../components/legal/PersonalDataConsentCheckbox';
+import { formatAuthError } from '../lib/authStorage';
 
 export default function MasterRegister() {
   const navigate = useNavigate();
@@ -16,6 +18,8 @@ export default function MasterRegister() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [pdConsent, setPdConsent] = useState(false);
   const [devCode, setDevCode] = useState('');
   const partnerRef = searchParams.get('ref');
 
@@ -38,7 +42,7 @@ export default function MasterRegister() {
       setDevCode(res.data.devCode || '');
       setStep('verify');
     } catch (err) {
-      setError(err.response?.data?.error || 'Ошибка при регистрации');
+      setError(formatAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -53,7 +57,7 @@ export default function MasterRegister() {
       sessionStorage.removeItem('partner_ref');
       navigate('/dashboard', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.error || 'Неверный код');
+      setError(formatAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -96,7 +100,7 @@ export default function MasterRegister() {
                 ref: ref || undefined,
               });
             } catch (err) {
-              setError(err.response?.data?.error || 'Ошибка отправки');
+              setError(formatAuthError(err));
             } finally {
               setLoading(false);
             }
@@ -136,6 +140,8 @@ export default function MasterRegister() {
         <label className="flex gap-3 cursor-pointer text-sm text-ink-secondary leading-snug">
           <input
             type="checkbox"
+            checked={termsAccepted}
+            onChange={(e) => setTermsAccepted(e.target.checked)}
             required
             className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
           />
@@ -143,10 +149,6 @@ export default function MasterRegister() {
             Принимаю{' '}
             <Link to="/legal/offer" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">
               договор оферты
-            </Link>
-            ,{' '}
-            <Link to="/legal/privacy" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">
-              политику персональных данных
             </Link>{' '}
             и{' '}
             <Link to="/legal/payment" className="text-primary hover:underline" target="_blank" rel="noopener noreferrer">
@@ -154,7 +156,8 @@ export default function MasterRegister() {
             </Link>
           </span>
         </label>
-        <Button type="submit" className="w-full" size="lg" loading={loading}>
+        <PersonalDataConsentCheckbox checked={pdConsent} onChange={setPdConsent} variant="master" />
+        <Button type="submit" className="w-full" size="lg" loading={loading} disabled={!termsAccepted || !pdConsent}>
           Получить код
         </Button>
       </form>

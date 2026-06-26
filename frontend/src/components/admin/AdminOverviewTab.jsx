@@ -1,10 +1,15 @@
 import { useMemo, useState } from 'react';
-import { Users, CreditCard, Wallet, CalendarClock } from 'lucide-react';
+import { Users, CreditCard, Wallet, CalendarClock, ExternalLink, Repeat, Crown } from 'lucide-react';
 import { formatRub, formatDate } from './adminFormat';
 import AdminTablePagination from './AdminTablePagination';
 
 const MASTERS_PAGE_SIZE = 10;
 const PAYMENTS_PAGE_SIZE = 5;
+
+function masterClientPagePath(row) {
+  const segment = row.public_slug || row.id;
+  return segment ? `/m/${encodeURIComponent(segment)}` : null;
+}
 
 function StatCard({ icon: Icon, label, value, hint }) {
   return (
@@ -71,11 +76,13 @@ export default function AdminOverviewTab({ overview, masters, payments }) {
   return (
     <div className="space-y-8">
       {overview ? (
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           <StatCard icon={Users} label="Всего мастеров" value={overview.mastersTotal} hint={`+${overview.mastersThisMonth} в этом месяце`} />
+          <StatCard icon={Crown} label="Тариф «Безлимит»" value={overview.unlimitedActive} hint="Активная подписка" />
+          <StatCard icon={Repeat} label="Тариф «За запись»" value={overview.perBookingActive} hint="Оплата за каждую запись" />
           <StatCard icon={CreditCard} label="Оплаты (всего)" value={formatRub(overview.paymentsTotalRub)} hint={`${formatRub(overview.paymentsThisMonthRub)} в этом месяце`} />
           <StatCard icon={Wallet} label="Списания за записи" value={formatRub(overview.bookingFeesThisMonthRub)} hint="В этом месяце" />
-          <StatCard icon={CalendarClock} label="Активный безлимит" value={overview.unlimitedActive} hint={`${overview.paymentsPending} платежей в ожидании`} />
+          <StatCard icon={CalendarClock} label="Платежи в ожидании" value={overview.paymentsPending} hint="Статус pending в ЮKassa" />
         </section>
       ) : null}
 
@@ -92,21 +99,41 @@ export default function AdminOverviewTab({ overview, masters, payments }) {
                 <th className="px-5 py-3 font-medium">Email</th>
                 <th className="px-5 py-3 font-medium">Баланс</th>
                 <th className="px-5 py-3 font-medium">Тариф</th>
+                <th className="px-5 py-3 font-medium w-28">Страница</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {mastersSlice.map((row) => (
+              {mastersSlice.map((row) => {
+                const clientPagePath = masterClientPagePath(row);
+                return (
                 <tr key={row.id} className="hover:bg-slate-50/80">
                   <td className="px-5 py-3 whitespace-nowrap text-slate-600">{formatDate(row.created_at)}</td>
                   <td className="px-5 py-3 font-medium text-slate-900">{row.salon_name || row.display_name}</td>
                   <td className="px-5 py-3 text-slate-600">{row.email}</td>
                   <td className="px-5 py-3 font-medium">{formatRub(row.balance)}</td>
                   <td className="px-5 py-3 text-slate-600">{tariffLabel(row)}</td>
+                  <td className="px-5 py-3">
+                    {clientPagePath ? (
+                      <a
+                        href={clientPagePath}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-violet-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50"
+                        title="Открыть страницу мастера для клиентов"
+                      >
+                        <ExternalLink size={13} strokeWidth={2.25} />
+                        Профиль
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
               {masters.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
                     Регистраций пока нет
                   </td>
                 </tr>

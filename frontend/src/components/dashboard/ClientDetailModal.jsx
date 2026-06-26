@@ -271,7 +271,7 @@ export default function ClientDetailModal({
 
   return (
     <>
-      <Modal open={!!clientId} onClose={onClose} size="md" bleed footer={null}>
+      <Modal open={!!clientId} onClose={onClose} size="md" bleed mobileFullScreen footer={null}>
         {loading ? (
           <div className="py-12 flex justify-center">
             <PageLoader />

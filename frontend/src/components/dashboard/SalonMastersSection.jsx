@@ -177,34 +177,58 @@ export default function SalonMastersSection({ masters, api, onChanged, toast }) 
           {active.map((m) => (
             <li
               key={m.id}
-              className="flex items-center gap-4 rounded-xl border border-admin-border/70 bg-white p-3 transition hover:border-violet-200/80"
+              className="flex flex-col gap-3 rounded-xl border border-admin-border/70 bg-white p-3 transition hover:border-violet-200/80 sm:flex-row sm:items-center sm:gap-4"
             >
-              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-admin-accentSoft ring-1 ring-admin-border/60">
-                {m.photo_url ? (
-                  <img src={mediaUrl(m.photo_url)} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-lg font-bold text-admin-accent">
-                    {m.name?.[0]}
-                  </div>
-                )}
+              <div className="flex min-w-0 items-start gap-3 sm:flex-1 sm:items-center sm:gap-4">
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-admin-accentSoft ring-1 ring-admin-border/60">
+                  {m.photo_url ? (
+                    <img src={mediaUrl(m.photo_url)} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-lg font-bold text-admin-accent">
+                      {m.name?.[0]}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold leading-snug text-admin-text break-words">
+                    {[m.last_name, m.name].filter(Boolean).join(' ') || m.name}
+                  </p>
+                  {m.specialty && (
+                    <p className="mt-0.5 text-xs leading-snug text-admin-textMuted break-words">{m.specialty}</p>
+                  )}
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-admin-textMuted">
+                    <span className="whitespace-nowrap">{m.slot_step_minutes} мин · {m.commission_percent ?? 0}%</span>
+                    {m.email ? (
+                      <span className="mt-0.5 block truncate sm:mt-0 sm:inline sm:before:content-['·_']">
+                        {m.email}
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold text-admin-text">{[m.last_name, m.name].filter(Boolean).join(' ') || m.name}</p>
-                {m.specialty && <p className="truncate text-xs text-admin-textMuted">{m.specialty}</p>}
-                <p className="mt-1 text-[11px] text-admin-textMuted">
-                  {m.slot_step_minutes} мин · {m.commission_percent ?? 0}%
-                  {m.email ? ` · ${m.email}` : ''}
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-1.5">
-                <Button size="sm" variant="soft" onClick={() => openEdit(m)}>
+              <div
+                className={`grid w-full gap-2 sm:flex sm:w-auto sm:shrink-0 sm:gap-1.5 ${
+                  active.length > 1 ? 'grid-cols-3' : 'grid-cols-2'
+                }`}
+              >
+                <Button size="sm" variant="soft" className="w-full !px-2 sm:w-auto sm:!px-3" onClick={() => openEdit(m)}>
                   Изменить
                 </Button>
-                <Button size="sm" variant="ghost" className="!text-red-600" onClick={() => handleDelete(m)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="w-full !px-2 !text-red-600 sm:w-auto sm:!px-3"
+                  onClick={() => handleDelete(m)}
+                >
                   Удалить
                 </Button>
                 {active.length > 1 && (
-                  <Button size="sm" variant="ghost" onClick={() => handleDeactivate(m.id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full !px-2 sm:w-auto sm:!px-3"
+                    onClick={() => handleDeactivate(m.id)}
+                  >
                     Скрыть
                   </Button>
                 )}

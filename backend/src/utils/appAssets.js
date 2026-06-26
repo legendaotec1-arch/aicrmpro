@@ -24,7 +24,7 @@ function readAppAssets() {
   }
 
   const jsFile = files.find((f) => /^index-.*\.js$/.test(f));
-  const cssFile = files.find((f) => /^index-.*\.css$/.test(f));
+  const cssFile = files.find((f) => /^(index|style)-.*\.css$/.test(f));
   cached = {
     js: jsFile ? `/assets/${jsFile}` : null,
     css: cssFile ? `/assets/${cssFile}` : null,

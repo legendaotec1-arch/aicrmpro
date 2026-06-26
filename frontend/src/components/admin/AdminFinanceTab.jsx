@@ -1,23 +1,51 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowDownCircle, TrendingUp, Wallet, PiggyBank } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowDownCircle, TrendingUp, Wallet, PiggyBank, MinusCircle } from 'lucide-react';
 import adminApi from '../../lib/adminApi';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { formatRub, formatDate } from './adminFormat';
 
-function MoneyCard({ icon: Icon, label, value, hint, accent }) {
+const EARNED_PERIODS = [
+  { id: 'today', label: 'Сегодня', field: 'earnedTodayRub', hint: 'С 00:00 по Москве' },
+  { id: '7d', label: '7 дней', field: 'earned7dRub', hint: 'За последние 7 суток' },
+  { id: '30d', label: '30 дней', field: 'earned30dRub', hint: 'За последние 30 суток' },
+];
+
+function MoneyCard({ icon: Icon, label, value, hint, accent, children }) {
   return (
     <div className={`rounded-2xl border bg-white p-5 shadow-sm ${accent || 'border-slate-200'}`}>
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
+          {children ? <div className="mb-2">{children}</div> : null}
           <p className="text-sm text-slate-500">{label}</p>
           <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
           {hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
         </div>
-        <div className="rounded-xl bg-violet-50 p-2.5 text-violet-600">
+        <div className="shrink-0 rounded-xl bg-violet-50 p-2.5 text-violet-600">
           <Icon size={20} />
         </div>
       </div>
+    </div>
+  );
+}
+
+function PeriodToggle({ value, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+      {EARNED_PERIODS.map((period) => (
+        <button
+          key={period.id}
+          type="button"
+          onClick={() => onChange(period.id)}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+            value === period.id
+              ? 'bg-white text-violet-700 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          {period.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -26,6 +54,7 @@ export default function AdminFinanceTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [earnedPeriod, setEarnedPeriod] = useState('today');
   const [showForm, setShowForm] = useState(false);
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
@@ -46,6 +75,13 @@ export default function AdminFinanceTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const earnedPeriodMeta = useMemo(
+    () => EARNED_PERIODS.find((p) => p.id === earnedPeriod) || EARNED_PERIODS[0],
+    [earnedPeriod]
+  );
+
+  const earnedForPeriod = data ? Number(data[earnedPeriodMeta.field] ?? 0) : 0;
 
   const submitWithdrawal = async (e) => {
     e.preventDefault();
@@ -75,10 +111,38 @@ export default function AdminFinanceTab() {
       {data ? (
         <>
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MoneyCard icon={TrendingUp} label="Заработали сегодня" value={formatRub(data.earnedTodayRub)} hint="Успешные оплаты ЮKassa" accent="border-emerald-200" />
-            <MoneyCard icon={Wallet} label="Заработали всего" value={formatRub(data.earnedTotalRub)} hint="Все поступления на платформу" />
-            <MoneyCard icon={ArrowDownCircle} label="Списано" value={formatRub(data.withdrawnRub)} hint="Выводы со счёта" accent="border-amber-200" />
-            <MoneyCard icon={PiggyBank} label="На счёте" value={formatRub(data.balanceRub)} hint="Всего − списания" accent="border-violet-200" />
+            <MoneyCard
+              icon={TrendingUp}
+              label="Заработали"
+              value={formatRub(earnedForPeriod)}
+              hint={`${earnedPeriodMeta.hint} · успешные оплаты ЮKassa`}
+              accent="border-emerald-200"
+            >
+              <PeriodToggle value={earnedPeriod} onChange={setEarnedPeriod} />
+            </MoneyCard>
+
+            <MoneyCard
+              icon={PiggyBank}
+              label="На счёте"
+              value={formatRub(data.balanceRub)}
+              hint="Поступления с оплат минус списания со счёта"
+              accent="border-violet-300 ring-1 ring-violet-100"
+            />
+
+            <MoneyCard
+              icon={Wallet}
+              label="Заработано всего"
+              value={formatRub(data.earnedTotalRub)}
+              hint="Все успешные оплаты за всё время проекта"
+            />
+
+            <MoneyCard
+              icon={MinusCircle}
+              label="Списано всего"
+              value={formatRub(data.withdrawnRub)}
+              hint="Все выводы и расходы со счёта платформы"
+              accent="border-amber-200"
+            />
           </section>
 
           <div className="flex justify-end">
@@ -91,7 +155,7 @@ export default function AdminFinanceTab() {
           {showForm ? (
             <form onSubmit={submitWithdrawal} className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm space-y-3 max-w-lg">
               <h3 className="font-bold text-slate-900">Списание со счёта</h3>
-              <p className="text-sm text-slate-500">Доступно: {formatRub(data.balanceRub)}</p>
+              <p className="text-sm text-slate-500">Доступно на счёте: {formatRub(data.balanceRub)}</p>
               <Input
                 label="Сумма, ₽"
                 type="number"

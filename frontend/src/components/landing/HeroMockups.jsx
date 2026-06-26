@@ -43,7 +43,7 @@ function DashboardMockup() {
       <div className="grid min-h-[260px] grid-cols-[minmax(72px,88px)_1fr] sm:min-h-[280px] sm:grid-cols-[110px_1fr] md:min-h-[300px] md:grid-cols-[130px_1fr] lg:grid-cols-[140px_1fr]">
         <aside className="bg-[#0f172a] p-2 sm:p-3">
           <p className="mb-2 text-[9px] font-bold text-white sm:mb-4 sm:text-xs">
-            Master<span className="text-violet-400">Client45</span>
+            <BrandName className="!text-white [&_span]:!text-violet-300" />
           </p>
           <nav className="space-y-0.5">
             {menu.map((item, i) => (
@@ -154,7 +154,7 @@ function PhoneMockup() {
           {/* Экран приложения */}
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
             <div className="shrink-0 border-b border-slate-100 px-2 py-1.5 text-center">
-              <p className="text-[9px] font-bold text-slate-900 leading-tight">Beauty Studio</p>
+              <p className="text-[9px] font-bold text-slate-900 leading-tight">Студия красоты</p>
               <div className="mt-0.5 flex items-center justify-center gap-px">
                 {[1, 2, 3, 4, 5].map((i) => (
                   <Star key={i} className="h-2 w-2 fill-amber-400 text-amber-400" strokeWidth={0} />

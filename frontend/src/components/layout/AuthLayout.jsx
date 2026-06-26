@@ -50,7 +50,10 @@ export default function AuthLayout({ children, title, subtitle, variant = 'maste
               Оферта
             </Link>
             <Link to="/legal/privacy" className="hover:text-white/70 transition">
-              Персональные данные
+              Политика ПДн
+            </Link>
+            <Link to="/legal/personal-data-consent" className="hover:text-white/70 transition">
+              Согласие на ПДн
             </Link>
             <Link to="/legal/payment" className="hover:text-white/70 transition">
               Оплата и возврат

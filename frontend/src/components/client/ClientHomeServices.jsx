@@ -5,6 +5,7 @@ import { formatServicePrice } from '../../lib/format';
 import { mediaUrl } from '../../lib/media';
 import { formatSalonMasterName } from '../../lib/masterDisplay';
 import SalonMasterAvatar from './SalonMasterAvatar';
+import { messengerBackdropFilter } from '../../lib/messengerWebApp';
 
 const PREMIUM = {
   bgCard: 'rgba(255, 255, 255, 0.92)',
@@ -26,12 +27,13 @@ const PREMIUM = {
 };
 
 function PremiumCard({ children, style = {} }) {
+  const blur = messengerBackdropFilter(PREMIUM.blurHeavy);
   return (
     <div
       style={{
         background: PREMIUM.bgCard,
-        backdropFilter: PREMIUM.blurHeavy,
-        WebkitBackdropFilter: PREMIUM.blurHeavy,
+        backdropFilter: blur,
+        WebkitBackdropFilter: blur,
         border: `1px solid ${PREMIUM.borderCard}`,
         borderRadius: PREMIUM.radiusCard,
         boxShadow: '0 4px 20px rgba(0, 0, 0, 0.04)',

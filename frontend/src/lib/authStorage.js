@@ -46,7 +46,7 @@ export function formatAuthError(err) {
   }
   if (!err?.response) {
     if (err?.code === 'ECONNABORTED') {
-      return 'Превышено время ожидания. Проверьте интернет или попробуйте Wi‑Fi.';
+      return 'Превышено время ожидания. Проверьте интернет или попробуйте Wi‑Fi. Зарядите телефон, если батарея ниже 10%.';
     }
     return 'Нет связи с сервером. Проверьте интернет и обновите страницу.';
   }
@@ -58,6 +58,14 @@ export function formatAuthError(err) {
     return first?.msg || 'Проверьте введённые данные';
   }
   if (err.response.status === 401) return 'Неверный код или email';
-  if (err.response.status === 404) return err.response.data?.error || 'Аккаунт не найден';
+  if (err.response.status === 404) {
+    if (err.response.data?.code === 'NOT_REGISTERED') {
+      return 'Вы не зарегистрированы. Перейдите на страницу регистрации.';
+    }
+    return err.response.data?.error || 'Аккаунт не найден';
+  }
+  if (err.response.status === 503) {
+    return err.response.data?.error || 'Сервис отправки писем временно недоступен. Попробуйте позже.';
+  }
   return 'Не удалось войти. Попробуйте ещё раз.';
 }

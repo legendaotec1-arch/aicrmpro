@@ -4,9 +4,23 @@ import adminApi from '../../lib/adminApi';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { PageLoader } from '../ui/Spinner';
+import AdminTablePagination from './AdminTablePagination';
+import { formatDate, formatRub } from './adminFormat';
+
+const PARTNERS_PAGE_SIZE = 10;
 
 function fmtRub(n) {
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(Number(n || 0));
+  return formatRub(n);
+}
+
+function statusBadge(active, verified) {
+  if (!active) {
+    return <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">Отключён</span>;
+  }
+  if (!verified) {
+    return <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">Email не подтверждён</span>;
+  }
+  return <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">Активен</span>;
 }
 
 export default function AdminPartnersTab() {
@@ -23,35 +37,73 @@ export default function AdminPartnersTab() {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [processingId, setProcessingId] = useState(null);
+  const [partners, setPartners] = useState([]);
+  const [partnersTotal, setPartnersTotal] = useState(0);
+  const [partnersPage, setPartnersPage] = useState(1);
+  const [partnersLoading, setPartnersLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const loadPartners = useCallback(async (page = 1) => {
+    setPartnersLoading(true);
     try {
-      const [sumRes, wRes, aRes, pRes] = await Promise.all([
-        adminApi.get('/partners/summary'),
-        adminApi.get('/partners/withdrawals?status=pending'),
-        adminApi.get('/partners/assets'),
-        adminApi.get('/partners/post-templates'),
-      ]);
-      setSummary(sumRes.data);
-      setWithdrawals(wRes.data.withdrawals || []);
-      setAssets(aRes.data.assets || []);
-      setPostTemplates(pRes.data.templates || []);
-      setPostTemplatesMax(pRes.data.max || 10);
+      const res = await adminApi.get('/partners', {
+        params: { page, limit: PARTNERS_PAGE_SIZE },
+      });
+      setPartners(res.data.partners || []);
+      setPartnersTotal(res.data.total ?? 0);
+      setPartnersPage(res.data.page ?? page);
     } finally {
-      setLoading(false);
+      setPartnersLoading(false);
     }
   }, []);
 
+  const loadCore = useCallback(async () => {
+    const [sumRes, wRes, aRes, pRes] = await Promise.all([
+      adminApi.get('/partners/summary'),
+      adminApi.get('/partners/withdrawals?status=pending'),
+      adminApi.get('/partners/assets'),
+      adminApi.get('/partners/post-templates'),
+    ]);
+    setSummary(sumRes.data);
+    setWithdrawals(wRes.data.withdrawals || []);
+    setAssets(aRes.data.assets || []);
+    setPostTemplates(pRes.data.templates || []);
+    setPostTemplatesMax(pRes.data.max || 10);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      await loadCore();
+      await loadPartners(partnersPage);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadCore, loadPartners, partnersPage]);
+
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        await loadCore();
+        if (!cancelled) await loadPartners(1);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loadCore, loadPartners]);
+
+  const handlePartnersPageChange = (page) => {
+    setPartnersPage(page);
+    loadPartners(page);
+  };
 
   const completeWithdrawal = async (id) => {
     setProcessingId(id);
     try {
       await adminApi.post(`/partners/withdrawals/${id}/complete`);
-      await load();
+      await refresh();
     } finally {
       setProcessingId(null);
     }
@@ -63,7 +115,7 @@ export default function AdminPartnersTab() {
     setProcessingId(id);
     try {
       await adminApi.post(`/partners/withdrawals/${id}/reject`, { note });
-      await load();
+      await refresh();
     } finally {
       setProcessingId(null);
     }
@@ -96,7 +148,7 @@ export default function AdminPartnersTab() {
         });
       }
       resetPostForm();
-      await load();
+      await refresh();
     } catch (err) {
       window.alert(err?.response?.data?.error || 'Ошибка сохранения');
     } finally {
@@ -114,7 +166,7 @@ export default function AdminPartnersTab() {
     try {
       await adminApi.delete(`/partners/post-templates/${id}`);
       if (editingPostId === id) resetPostForm();
-      await load();
+      await refresh();
     } catch (err) {
       window.alert(err?.response?.data?.error || 'Ошибка удаления');
     }
@@ -133,7 +185,7 @@ export default function AdminPartnersTab() {
       await adminApi.post('/partners/assets', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setFile(null);
       setUploadForm({ title: '', file_type: 'banner', description: '' });
-      await load();
+      await refresh();
     } finally {
       setUploading(false);
     }
@@ -161,6 +213,80 @@ export default function AdminPartnersTab() {
             <p className="text-2xl font-bold text-slate-900">{value ?? '—'}</p>
           </div>
         ))}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-4">
+          <h3 className="font-semibold text-slate-900">Список партнёров</h3>
+          <p className="text-xs text-slate-500">Регистрации, привлечённые мастера и начисления</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Регистрация</th>
+                <th className="px-5 py-3 font-medium">Партнёр</th>
+                <th className="px-5 py-3 font-medium">Реф. код</th>
+                <th className="px-5 py-3 font-medium text-center">Мастеров</th>
+                <th className="px-5 py-3 font-medium text-right">Баланс</th>
+                <th className="px-5 py-3 font-medium text-right">Заработано</th>
+                <th className="px-5 py-3 font-medium text-center">Комиссий</th>
+                <th className="px-5 py-3 font-medium text-center">Выводы</th>
+                <th className="px-5 py-3 font-medium text-center">%</th>
+                <th className="px-5 py-3 font-medium">Статус</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {partnersLoading && partners.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="px-5 py-8 text-center text-slate-400">
+                    Загрузка…
+                  </td>
+                </tr>
+              ) : partners.map((p) => (
+                <tr key={p.id} className="hover:bg-slate-50/80">
+                  <td className="px-5 py-3 whitespace-nowrap text-slate-600">{formatDate(p.created_at)}</td>
+                  <td className="px-5 py-3">
+                    <div className="font-medium text-slate-900">{p.full_name || '—'}</div>
+                    <div className="text-xs text-slate-500">{p.email}</div>
+                    {p.phone ? <div className="text-xs text-slate-400">{p.phone}</div> : null}
+                  </td>
+                  <td className="px-5 py-3 font-mono text-xs text-slate-600">{p.referral_code}</td>
+                  <td className="px-5 py-3 text-center font-medium text-slate-900">{p.referrals_count ?? 0}</td>
+                  <td className="px-5 py-3 text-right font-medium">{fmtRub(p.balance)}</td>
+                  <td className="px-5 py-3 text-right text-slate-600">{fmtRub(p.total_earned)}</td>
+                  <td className="px-5 py-3 text-center text-slate-600">
+                    {p.commissions_count ?? 0}
+                    {(p.commissions_total > 0) ? (
+                      <div className="text-xs text-slate-400">{fmtRub(p.commissions_total)}</div>
+                    ) : null}
+                  </td>
+                  <td className="px-5 py-3 text-center text-slate-600">
+                    {p.withdrawals_completed ?? 0}
+                    {(p.withdrawals_pending > 0) ? (
+                      <div className="text-xs text-amber-600">+{p.withdrawals_pending} ожид.</div>
+                    ) : null}
+                  </td>
+                  <td className="px-5 py-3 text-center text-slate-600">{p.commission_percent ?? '—'}%</td>
+                  <td className="px-5 py-3">{statusBadge(p.is_active, p.email_verified)}</td>
+                </tr>
+              ))}
+              {!partnersLoading && partners.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="px-5 py-8 text-center text-slate-400">
+                    Партнёров пока нет
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+          <AdminTablePagination
+            page={partnersPage}
+            pageSize={PARTNERS_PAGE_SIZE}
+            total={partnersTotal}
+            onPageChange={handlePartnersPageChange}
+          />
+        </div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">

@@ -68,16 +68,16 @@
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.3);
   }
-  /* iOS Safari fallback - no blur, just semi-transparent bg */
-  @supports (-webkit-backdrop-filter: none) {
-    .card-glass, .glass, .glass-dark {
-      background: rgba(255, 255, 255, 0.9);
-    }
-  }
-  @supports not (-webkit-backdrop-filter: none) {
-    .card-glass, .glass, .glass-dark {
-      background: rgba(255, 255, 255, 0.95);
-    }
+  /* iOS Safari: blur тормозит при частых перерисовках — класс ставится в index.html */
+  html.ios-env .input-field,
+  html.ios-env .card-light,
+  html.ios-env .card-glass,
+  html.ios-env .glass,
+  html.ios-env .glass-header,
+  html.ios-env .glass-dark {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(255, 255, 255, 0.96) !important;
   }
   .chip {
     @apply rounded-full px-4 py-2 text-sm font-medium transition whitespace-nowrap;
@@ -205,6 +205,48 @@
   }
   .safe-top {
     padding-top: max(env(safe-area-inset-top), 0px);
+  }
+
+  /* Кабинет мастера — отступы под фикс. шапку и нижнюю панель */
+  @media (max-width: 1023px) {
+    :root {
+      --dash-header-h: 3.5rem;
+      --dash-tabbar-h: 4rem;
+      --dash-safe-top: max(env(safe-area-inset-top, 0px), 12px);
+      --dash-safe-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+      --dash-vv-bottom: var(--mobile-vv-bottom, var(--ios-vv-bottom, 0px));
+      --dash-gap-top: 1rem;
+      --dash-gap-bottom: 1.75rem;
+    }
+
+    .dashboard-mobile-header {
+      padding-top: var(--dash-safe-top);
+    }
+
+    .dashboard-mobile-header-offset {
+      padding-top: calc(var(--dash-header-h) + var(--dash-safe-top) + var(--dash-gap-top));
+    }
+
+    .dashboard-mobile-main {
+      padding-top: 0.5rem;
+      padding-bottom: calc(
+        var(--dash-tabbar-h) + var(--dash-safe-bottom) + var(--dash-vv-bottom) + var(--dash-gap-bottom)
+      );
+      scroll-padding-top: calc(var(--dash-header-h) + var(--dash-safe-top) + var(--dash-gap-top));
+      scroll-padding-bottom: calc(
+        var(--dash-tabbar-h) + var(--dash-safe-bottom) + var(--dash-vv-bottom) + var(--dash-gap-bottom)
+      );
+    }
+
+    .dashboard-mobile-tabbar {
+      bottom: var(--dash-vv-bottom);
+      padding-top: 0.375rem;
+      padding-bottom: var(--dash-safe-bottom);
+    }
+  }
+  html.ios-env .modal-backdrop-blur {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
   /* Клиентская страница — темы через CSS-переменные (--ct-*) */

@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from 'react';
 import Card, { CardHeader } from '../ui/Card';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -15,6 +16,17 @@ export default function PortfolioSection({
   onUpload,
   onDelete
 }) {
+  const previewUrl = useMemo(() => {
+    if (!portfolioFile) return null;
+    return URL.createObjectURL(portfolioFile);
+  }, [portfolioFile]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -42,9 +54,9 @@ export default function PortfolioSection({
               {portfolioFile ? (
                 <div className="flex flex-col items-center gap-2 p-4">
                   {portfolioFile.type.startsWith('video/') ? (
-                    <video src={URL.createObjectURL(portfolioFile)} className="h-16 w-16 object-cover rounded-lg" />
+                    <video src={previewUrl} className="h-16 w-16 object-cover rounded-lg" />
                   ) : (
-                    <img src={URL.createObjectURL(portfolioFile)} alt="Preview" className="h-16 w-16 object-cover rounded-lg" />
+                    <img src={previewUrl} alt="Preview" className="h-16 w-16 object-cover rounded-lg" />
                   )}
                   <div className="text-center">
                     <p className="text-sm font-semibold text-admin-text truncate max-w-[200px]">{portfolioFile.name}</p>

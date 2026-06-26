@@ -6,13 +6,22 @@ function attachRetry(client) {
   client.interceptors.response.use(
     (response) => response,
     async (error) => {
+      if (axios.isCancel?.(error) || error.code === 'ERR_CANCELED') {
+        return Promise.reject(error);
+      }
+
       const config = error.config;
       if (!config || config.__retryCount >= 1) {
         return Promise.reject(error);
       }
 
       const method = (config.method || 'get').toLowerCase();
-      if (method !== 'get') {
+      const isAuthPost = method === 'post' && /\/auth\/(login|verify-email|resend-code|register)/.test(config.url || '');
+      // Auth: без повтора — иначе двойное ожидание 25+25 с и два письма с кодом
+      if (isAuthPost) {
+        return Promise.reject(error);
+      }
+      if (method !== 'get' && !isAuthPost) {
         return Promise.reject(error);
       }
 

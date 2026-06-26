@@ -21,7 +21,20 @@ const {
   mapTaskRow,
   mapTaskCommentRow,
   mapTaskAttachmentRow,
+  ensureTaskReadSchema,
+  markTaskCommentsRead,
+  countAllUnreadComments,
 } = require('../utils/adminWorkspace');
+const {
+  ensureCrmSchema,
+  seedCrmIfEmpty,
+  seedTesterPack,
+  mapLeadRow,
+  mapFollowupRow,
+  LEAD_FIELDS,
+  CRM_STATUSES,
+  computeLeadStats,
+} = require('../utils/adminCrm');
 
 const router = express.Router();
 router.use(adminAuthMiddleware);
@@ -37,20 +50,33 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-router.get('/tasks', async (_req, res) => {
+router.get('/tasks', async (req, res) => {
   try {
+    await ensureTaskReadSchema();
+    const adminEmail = req.adminEmail;
     const result = await db.query(
       `SELECT t.id, t.title, t.description, t.status, t.assignee_email, t.created_by, t.priority,
               t.sort_order, t.created_at, t.updated_at,
               (SELECT COUNT(*)::int FROM admin_task_comments c WHERE c.task_id = t.id) AS comment_count,
-              (SELECT COUNT(*)::int FROM admin_task_attachments a WHERE a.task_id = t.id) AS attachment_count
+              (SELECT COUNT(*)::int FROM admin_task_attachments a WHERE a.task_id = t.id) AS attachment_count,
+              (
+                SELECT COUNT(*)::int FROM admin_task_comments c
+                WHERE c.task_id = t.id
+                  AND LOWER(c.created_by) <> LOWER($1)
+                  AND c.created_at > COALESCE(
+                    (SELECT r.last_read_at FROM admin_task_read_state r
+                     WHERE r.task_id = t.id AND LOWER(r.admin_email) = LOWER($1)),
+                    'epoch'::timestamptz
+                  )
+              ) AS unread_comment_count
        FROM admin_tasks t
        ORDER BY
          CASE t.status
            WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'review' THEN 3 WHEN 'done' THEN 4 ELSE 5
          END,
          t.sort_order ASC,
-         t.created_at DESC`
+         t.created_at DESC`,
+      [adminEmail]
     );
     res.json({
       tasks: result.rows.map(mapTaskRow),
@@ -59,6 +85,16 @@ router.get('/tasks', async (_req, res) => {
   } catch (err) {
     console.error('Admin tasks list:', err);
     res.status(500).json({ error: 'Не удалось загрузить задачи' });
+  }
+});
+
+router.get('/tasks/unread-total', async (req, res) => {
+  try {
+    const total = await countAllUnreadComments(req.adminEmail);
+    res.json({ total });
+  } catch (err) {
+    console.error('Admin tasks unread total:', err);
+    res.status(500).json({ error: 'Не удалось загрузить счётчик' });
   }
 });
 
@@ -170,6 +206,8 @@ router.delete('/tasks/:id', async (req, res) => {
 
 router.get('/tasks/:id', async (req, res) => {
   try {
+    await markTaskCommentsRead(req.params.id, req.adminEmail);
+
     const taskRes = await db.query(
       `SELECT id, title, description, status, assignee_email, created_by, priority, sort_order, created_at, updated_at
        FROM admin_tasks WHERE id = $1`,
@@ -200,6 +238,7 @@ router.get('/tasks/:id', async (req, res) => {
         ...row,
         comment_count: commentsRes.rows.length,
         attachment_count: attachmentsRes.rows.length,
+        unread_comment_count: 0,
       }),
       comments: commentsRes.rows.map(mapTaskCommentRow),
       attachments: attachmentsRes.rows.map(mapTaskAttachmentRow),
@@ -222,6 +261,7 @@ router.post('/tasks/:id/comments', async (req, res) => {
       `INSERT INTO admin_task_comments (task_id, body, created_by) VALUES ($1, $2, $3) RETURNING *`,
       [req.params.id, body, req.adminEmail]
     );
+    await markTaskCommentsRead(req.params.id, req.adminEmail);
     res.status(201).json({ comment: mapTaskCommentRow(result.rows[0]) });
   } catch (err) {
     console.error('Admin task comment:', err);
@@ -514,12 +554,22 @@ router.delete('/files/:id', async (req, res) => {
 router.get('/finance/summary', async (_req, res) => {
   try {
     const tz = 'Europe/Moscow';
-    const [earnedToday, earnedTotal, withdrawnTotal, recent] = await Promise.all([
+    const [earnedToday, earned7d, earned30d, earnedTotal, withdrawnTotal, recent] = await Promise.all([
       db.query(
         `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments
          WHERE status = 'succeeded'
            AND created_at >= date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1`,
         [tz]
+      ),
+      db.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments
+         WHERE status = 'succeeded'
+           AND created_at >= NOW() - INTERVAL '7 days'`
+      ),
+      db.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments
+         WHERE status = 'succeeded'
+           AND created_at >= NOW() - INTERVAL '30 days'`
       ),
       db.query(
         `SELECT COALESCE(SUM(amount), 0)::numeric AS s FROM billing_payments WHERE status = 'succeeded'`
@@ -534,11 +584,15 @@ router.get('/finance/summary', async (_req, res) => {
     ]);
 
     const earnedTodayRub = Number(earnedToday.rows[0].s);
+    const earned7dRub = Number(earned7d.rows[0].s);
+    const earned30dRub = Number(earned30d.rows[0].s);
     const earnedTotalRub = Number(earnedTotal.rows[0].s);
     const withdrawnRub = Number(withdrawnTotal.rows[0].s);
 
     res.json({
       earnedTodayRub,
+      earned7dRub,
+      earned30dRub,
       earnedTotalRub,
       withdrawnRub,
       balanceRub: earnedTotalRub - withdrawnRub,
@@ -1241,6 +1295,239 @@ router.delete('/partners/post-templates/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка удаления поста' });
+  }
+});
+
+// --- CRM: Рабочий стол менеджера ---
+
+router.get('/crm/bootstrap', async (_req, res) => {
+  try {
+    await ensureCrmSchema();
+    await seedCrmIfEmpty();
+    await seedTesterPack();
+
+    const [leadsRes, followupsRes, analyticsRes, staticRes, refRes] = await Promise.all([
+      db.query(
+        `SELECT * FROM admin_crm_leads ORDER BY sort_order ASC, created_at DESC LIMIT 2000`
+      ),
+      db.query(`SELECT * FROM admin_crm_followups ORDER BY sort_order ASC, touch_date ASC NULLS LAST`),
+      db.query(`SELECT * FROM admin_crm_analytics ORDER BY sort_order ASC`),
+      db.query(`SELECT sheet_key, content FROM admin_crm_static`),
+      db.query(`SELECT id, sheet_key, cols, sort_order FROM admin_crm_ref_rows ORDER BY sheet_key, sort_order`),
+    ]);
+
+    const leads = leadsRes.rows.map(mapLeadRow);
+    const staticMap = Object.fromEntries(staticRes.rows.map((r) => [r.sheet_key, r.content]));
+    const refBySheet = { scripts: [], answers: [], search: [] };
+    for (const row of refRes.rows) {
+      if (!refBySheet[row.sheet_key]) refBySheet[row.sheet_key] = [];
+      refBySheet[row.sheet_key].push({
+        id: row.id,
+        cols: Array.isArray(row.cols) ? row.cols : JSON.parse(row.cols || '[]'),
+        sort_order: row.sort_order,
+      });
+    }
+
+    res.json({
+      leads,
+      followups: followupsRes.rows.map(mapFollowupRow),
+      analytics: analyticsRes.rows,
+      static: staticMap,
+      scripts: refBySheet.scripts || [],
+      answers: refBySheet.answers || [],
+      search: refBySheet.search || [],
+      statuses: CRM_STATUSES,
+      stats: computeLeadStats(leads),
+    });
+  } catch (err) {
+    console.error('CRM bootstrap:', err);
+    res.status(500).json({ error: 'Не удалось загрузить рабочий стол' });
+  }
+});
+
+router.post('/crm/leads', async (req, res) => {
+  try {
+    await ensureCrmSchema();
+    const body = req.body || {};
+    const today = new Date().toISOString().slice(0, 10);
+    const result = await db.query(
+      `INSERT INTO admin_crm_leads (
+         lead_date, platform, contact, name, city, niche, status, note, created_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        body.lead_date || today,
+        body.platform?.trim() || null,
+        body.contact?.trim() || null,
+        body.name?.trim() || null,
+        body.city?.trim() || null,
+        body.niche?.trim() || null,
+        CRM_STATUSES.includes(body.status) ? body.status : 'Новый',
+        body.note?.trim() || null,
+        req.adminEmail,
+      ]
+    );
+    res.status(201).json({ lead: mapLeadRow(result.rows[0]) });
+  } catch (err) {
+    console.error('CRM lead create:', err);
+    res.status(500).json({ error: 'Не удалось добавить лид' });
+  }
+});
+
+router.put('/crm/leads/:id', async (req, res) => {
+  try {
+    await ensureCrmSchema();
+    const body = req.body || {};
+    const sets = [];
+    const vals = [req.params.id];
+    let i = 2;
+
+    for (const field of LEAD_FIELDS) {
+      if (body[field] === undefined) continue;
+      sets.push(`${field} = $${i}`);
+      vals.push(body[field] === '' ? null : body[field]);
+      i += 1;
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Нет полей для обновления' });
+
+    sets.push('updated_at = NOW()');
+    const result = await db.query(
+      `UPDATE admin_crm_leads SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+      vals
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Лид не найден' });
+    res.json({ lead: mapLeadRow(result.rows[0]) });
+  } catch (err) {
+    console.error('CRM lead update:', err);
+    res.status(500).json({ error: 'Не удалось обновить лид' });
+  }
+});
+
+router.delete('/crm/leads/:id', async (req, res) => {
+  try {
+    const result = await db.query('DELETE FROM admin_crm_leads WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'Лид не найден' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось удалить лид' });
+  }
+});
+
+router.put('/crm/ref/:sheetKey', async (req, res) => {
+  try {
+    const sheetKey = req.params.sheetKey;
+    if (!['scripts', 'answers', 'search'].includes(sheetKey)) {
+      return res.status(400).json({ error: 'Неизвестный справочник' });
+    }
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    await db.query('DELETE FROM admin_crm_ref_rows WHERE sheet_key = $1', [sheetKey]);
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      const cols = rows[idx].cols || rows[idx];
+      await db.query(
+        `INSERT INTO admin_crm_ref_rows (sheet_key, cols, sort_order) VALUES ($1, $2::jsonb, $3)`,
+        [sheetKey, JSON.stringify(cols), idx]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('CRM ref save:', err);
+    res.status(500).json({ error: 'Не удалось сохранить справочник' });
+  }
+});
+
+router.put('/crm/static/:sheetKey', async (req, res) => {
+  try {
+    const sheetKey = req.params.sheetKey;
+    if (!['instruction', 'schedule', 'checklist', 'rules', 'tester_changes', 'tester_principles', 'tester_dialogue', 'tester_tech', 'tester_summary'].includes(sheetKey)) {
+      return res.status(400).json({ error: 'Неизвестный раздел' });
+    }
+    const content = String(req.body?.content ?? '');
+    await db.query(
+      `INSERT INTO admin_crm_static (sheet_key, content, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (sheet_key) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()`,
+      [sheetKey, content]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось сохранить текст' });
+  }
+});
+
+router.put('/crm/analytics', async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    for (const row of rows) {
+      if (!row.metric_key) continue;
+      await db.query(
+        `UPDATE admin_crm_analytics
+         SET week_value = COALESCE($2, week_value),
+             month_value = COALESCE($3, month_value),
+             goal_value = COALESCE($4, goal_value)
+         WHERE metric_key = $1`,
+        [row.metric_key, row.week_value ?? null, row.month_value ?? null, row.goal_value ?? null]
+      );
+    }
+    const result = await db.query(`SELECT * FROM admin_crm_analytics ORDER BY sort_order ASC`);
+    res.json({ analytics: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось сохранить аналитику' });
+  }
+});
+
+router.post('/crm/followups', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await db.query(
+      `INSERT INTO admin_crm_followups (contact, touch_date, touch_number, message_text, sent, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [
+        body.contact?.trim() || '',
+        body.touch_date || null,
+        body.touch_number ?? null,
+        body.message_text?.trim() || null,
+        body.sent === '✅' ? '✅' : '⬜',
+        Number(body.sort_order) || 0,
+      ]
+    );
+    res.status(201).json({ followup: mapFollowupRow(result.rows[0]) });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось добавить касание' });
+  }
+});
+
+router.patch('/crm/followups/:id', async (req, res) => {
+  try {
+    const allowed = ['contact', 'touch_date', 'touch_number', 'message_text', 'sent', 'sort_order'];
+    const body = req.body || {};
+    const sets = [];
+    const vals = [req.params.id];
+    let i = 2;
+    for (const key of allowed) {
+      if (body[key] === undefined) continue;
+      sets.push(`${key} = $${i}`);
+      vals.push(body[key]);
+      i += 1;
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Нет полей' });
+    sets.push('updated_at = NOW()');
+    const result = await db.query(
+      `UPDATE admin_crm_followups SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+      vals
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Не найдено' });
+    res.json({ followup: mapFollowupRow(result.rows[0]) });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось обновить касание' });
+  }
+});
+
+router.delete('/crm/followups/:id', async (req, res) => {
+  try {
+    const result = await db.query('DELETE FROM admin_crm_followups WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'Не найдено' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось удалить' });
   }
 });
 

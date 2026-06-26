@@ -4,23 +4,102 @@
     <meta charset="UTF-8" />
     <script>
       (function () {
-        window.__wonerBootError = function () {
+        var ua = navigator.userAgent || '';
+        window.__wonerIsIOS = /iPad|iPhone|iPod/.test(ua)
+          || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (window.__wonerIsIOS) document.documentElement.classList.add('ios-env');
+
+        window.__wonerBootReported = window.__wonerBootReported || {};
+        window.__wonerHasCookieConsent = function () {
+          try {
+            var v = localStorage.getItem('woner_cookie_consent');
+            return v === 'essential' || v === 'all';
+          } catch (e) { return false; }
+        };
+        window.__wonerReportBootFailure = function (stage, extra) {
+          if (!stage || window.__wonerBootReported[stage]) return;
+          if (!window.__wonerHasCookieConsent()) return;
+          window.__wonerBootReported[stage] = 1;
+          var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+          var payload = JSON.stringify({
+            event: stage,
+            t: Date.now(),
+            path: location.pathname || '',
+            search: (location.search || '').slice(0, 200),
+            ua: (navigator.userAgent || '').slice(0, 160),
+            ios: !!window.__wonerIsIOS,
+            visible: document.visibilityState || '',
+            online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
+            conn: conn ? (conn.effectiveType || conn.type || '') : '',
+            ...(extra || {}),
+          });
+          try {
+            if (navigator.sendBeacon) {
+              navigator.sendBeacon('/api/logs/client', new Blob([payload], { type: 'application/json' }));
+            } else {
+              fetch('/api/logs/client', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true,
+              }).catch(function () {});
+            }
+          } catch (err) { /* ignore */ }
+        };
+
+        window.__wonerBootError = function (reason) {
+          window.__wonerReportBootFailure('BOOT_FAILED_UI', { reason: reason || 'unknown' });
+          if (/^\/m\//.test(location.pathname || '')) return;
           var root = document.getElementById('root');
-          if (!root) return;
+          if (!root || root.dataset.mounted === '1') return;
           root.innerHTML =
-            '<div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;text-align:center;color:#334155">' +
+            '<div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;text-align:center;color:#334155;background:#fff;min-height:100vh;box-sizing:border-box;padding-top:max(24px,env(safe-area-inset-top))">' +
             '<p style="font-size:18px;font-weight:600;margin:0 0 8px">Не удалось загрузить сайт</p>' +
             '<p style="font-size:14px;color:#64748b;margin:0 0 16px">Попробуйте обновить страницу</p>' +
             '<a href="' + (location.pathname || '/') + '?t=' + Date.now() + '" style="display:inline-block;padding:12px 24px;background:#6A5ACD;color:#fff;border-radius:12px;text-decoration:none;font-weight:600">Обновить</a>' +
             '</div>';
         };
 
-        if ('serviceWorker' in navigator) {
+        window.addEventListener('error', function (e) {
+          var root = document.getElementById('root');
+          if (root && root.dataset.mounted === '1') return;
+
+          var t = e.target;
+          if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+            var src = t.src || t.href || '';
+            if (/telegram-web-app/i.test(src)) return;
+            if (!/\/assets\//.test(src) && !/\/src\/main/.test(src)) return;
+            window.__wonerReportBootFailure('BOOT_ASSET_ERROR', { asset: src.slice(0, 240) });
+            window.__wonerBootError('asset');
+            return;
+          }
+
+          if (e.message) {
+            window.__wonerReportBootFailure('BOOT_JS_ERROR', {
+              message: String(e.message).slice(0, 240),
+              file: e.filename ? String(e.filename).slice(0, 120) : '',
+              line: e.lineno || 0,
+            });
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var root = document.getElementById('root');
+          if (root && root.dataset.mounted === '1') return;
+          var reason = e.reason;
+          var message = reason && (reason.message || String(reason)) || 'unhandledrejection';
+          window.__wonerReportBootFailure('BOOT_PROMISE_REJECT', {
+            message: String(message).slice(0, 240),
+          });
+        });
+
+        var isMessengerPage = /^\/m\//.test(location.pathname || '') || /[?&]ch=(max|telegram)/.test(location.search || '');
+        if (!isMessengerPage && 'serviceWorker' in navigator) {
           navigator.serviceWorker.getRegistrations().then(function (regs) {
             regs.forEach(function (r) { r.unregister(); });
           }).catch(function () {});
         }
-        if ('caches' in window) {
+        if ('caches' in window && !isMessengerPage) {
           caches.keys().then(function (keys) {
             keys.forEach(function (k) { caches.delete(k); });
           }).catch(function () {});
@@ -30,53 +109,83 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/favicon.png" sizes="96x96" />
     <link rel="icon" type="image/png" href="/images/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/jpeg" href="/images/favicon-48x48.jpg" sizes="48x48" />
+    <link rel="icon" type="image/png" href="/images/favicon-48x48.jpg" sizes="48x48" />
     <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="apple-mobile-web-app-title" content="Woner.ru" />
 
-    <!-- Yandex.Metrika counter — как можно выше в <head> -->
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      (function (m, e, t, r, i, k, a) {
-        m[i] = m[i] || function () { (m[i].a = m[i].a || []).push(arguments); };
-        m[i].l = 1 * new Date();
-        for (var j = 0; j < document.scripts.length; j++) { if (document.scripts[j].src === r) { return; } }
-        k = e.createElement(t);
-        a = e.getElementsByTagName(t)[0];
-        k.async = 1;
-        k.src = r;
-        a.parentNode.insertBefore(k, a);
-      })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js?id=110082756', 'ym');
+    <style id="woner-boot-splash-style">
+      .woner-splash{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.25rem;text-align:center;overflow:hidden}
+      .woner-splash--fullscreen{min-height:100dvh;width:100%;padding:max(24px,env(safe-area-inset-top)) 24px max(24px,env(safe-area-inset-bottom));background:radial-gradient(ellipse 80% 55% at 50% -10%,rgba(106,90,205,.14),transparent 65%),radial-gradient(ellipse 60% 45% at 50% 110%,rgba(106,90,205,.08),transparent 60%),linear-gradient(180deg,#fff 0%,#f8f7fc 48%,#fff 100%)}
+      .woner-splash__glow{position:absolute;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(106,90,205,.22) 0%,rgba(106,90,205,0) 70%);filter:blur(18px);animation:woner-splash-glow 2.4s ease-in-out infinite;pointer-events:none}
+      .woner-splash__loader{position:relative;width:72px;height:72px;z-index:1}
+      .woner-splash__ring{position:absolute;inset:0;border-radius:50%;border:2px solid transparent}
+      .woner-splash__ring--outer{border-top-color:#6a5acd;border-right-color:rgba(106,90,205,.35);animation:woner-splash-spin 1.15s cubic-bezier(.55,.15,.35,.85) infinite}
+      .woner-splash__ring--inner{inset:10px;border-bottom-color:#5a4cbd;border-left-color:rgba(90,76,189,.25);animation:woner-splash-spin-rev .85s cubic-bezier(.55,.15,.35,.85) infinite}
+      .woner-splash__core{position:absolute;inset:26px;border-radius:50%;background:linear-gradient(135deg,#6a5acd 0%,#5a4cbd 100%);box-shadow:0 4px 20px rgba(106,90,205,.45),inset 0 1px 0 rgba(255,255,255,.35);animation:woner-splash-pulse 1.6s ease-in-out infinite}
+      .woner-splash__brand{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:1.625rem;font-weight:800;letter-spacing:-.03em;line-height:1;z-index:1}
+      .woner-splash__word{color:#6a5acd}
+      .woner-splash__tld{color:#2b2b2b}
+      .woner-splash__status{display:flex;align-items:center;justify-content:center;margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:.875rem;font-weight:500;color:#6b7280;z-index:1}
+      .woner-splash__dots span{animation:woner-splash-dot 1.4s ease-in-out infinite;opacity:.25}
+      .woner-splash__dots span:nth-child(2){animation-delay:.2s}
+      .woner-splash__dots span:nth-child(3){animation-delay:.4s}
+      @keyframes woner-splash-spin{to{transform:rotate(360deg)}}
+      @keyframes woner-splash-spin-rev{to{transform:rotate(-360deg)}}
+      @keyframes woner-splash-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.92);opacity:.88}}
+      @keyframes woner-splash-glow{0%,100%{transform:scale(.92);opacity:.65}50%{transform:scale(1.08);opacity:1}}
+      @keyframes woner-splash-dot{0%,80%,100%{opacity:.2}40%{opacity:1}}
+    </style>
 
-      ym(110082756, 'init', {
-        ssr: true,
-        webvisor: true,
-        clickmap: true,
-        ecommerce: 'dataLayer',
-        referrer: document.referrer,
-        url: location.href,
-        accurateTrackBounce: true,
-        trackLinks: true,
-        defer: true
-      });
+    <script>
+      (function () {
+        var path = location.pathname || '';
+        var search = location.search || '';
+        window.__wonerInMessenger = /^\/m\//.test(path) || /[?&]ch=(max|telegram)/.test(search);
+        window.__wonerIsMaxClient = /[?&]ch=max\b/.test(search);
+        var isTelegramDeeplink = /[?&]ch=telegram\b/.test(search) && /[?&]uid=/.test(search);
+        var isOpenCode = /[?&]a=/.test(search);
+        var ua = navigator.userAgent || '';
+        var isTelegramUa = /Telegram/i.test(ua);
+
+        // Только внутри Telegram WebView — с нашего домена (telegram.org часто недоступен через VPN)
+        if (/^\/m\//.test(path) && isTelegramUa && !window.__wonerIsMaxClient && !isTelegramDeeplink && !isOpenCode) {
+          var tgScript = document.createElement('script');
+          tgScript.async = true;
+          tgScript.src = '/telegram-web-app.js';
+          tgScript.onerror = function () { /* не блокируем загрузку сайта */ };
+          tgScript.onload = function () {
+            try {
+              var tg = window.Telegram && window.Telegram.WebApp;
+              if (tg) {
+                tg.ready();
+                tg.expand();
+              }
+            } catch (e) { /* ignore */ }
+          };
+          document.head.appendChild(tgScript);
+        }
+      })();
     </script>
-    <!-- /Yandex.Metrika counter -->
+
+    <!-- Яндекс.Метрика загружается только после согласия в CookieConsentBanner (152-ФЗ) -->
 
     <!-- Primary SEO -->
-    <title>Woner.ru — онлайн-запись для мастеров | CRM для салонов красоты</title>
-    <meta name="description" content="Сервис онлайн записи клиентов. Онлайн-запись, база клиентов, расписание, прайс, портфолио и рассылки в MAX и Telegram — всё в одном сервисе." />
-    <meta name="keywords" content="онлайн запись мастеру, crm для мастеров, запись на услуги, salon booking, yclient аналог, онлайн запись салон, бот для записи, telegram запись клиентов" />
+    <title>Woner.ru — онлайн-запись и CRM для мастеров</title>
+    <meta name="description" content="Woner.ru — сервис онлайн-записи для мастеров и салонов. Расписание, клиенты, прайс, портфолио и рассылки в MAX и Telegram. Начните бесплатно." />
+    <meta name="keywords" content="онлайн запись мастеру, crm для мастеров, запись на услуги, аналог yclients, онлайн запись салон, бот для записи, запись клиентов в телеграм" />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://woner.ru/" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://woner.ru/" />
-    <meta property="og:title" content="Woner.ru — сервис онлайн записи клиентов" />
-    <meta property="og:description" content="Онлайн-запись, база клиентов, расписание, прайс, портфолио и рассылки в MAX и Telegram — всё в одном сервисе." />
+    <meta property="og:title" content="Woner.ru — онлайн-запись и CRM для мастеров" />
+    <meta property="og:description" content="Woner.ru — сервис онлайн-записи для мастеров и салонов. Расписание, клиенты, прайс, портфолио и рассылки в MAX и Telegram." />
     <meta property="og:image" content="https://woner.ru/images/og-image.jpg" />
     <meta property="og:image:secure_url" content="https://woner.ru/images/og-image.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
@@ -88,13 +197,25 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Woner.ru — сервис онлайн записи клиентов" />
-    <meta name="twitter:description" content="Онлайн-запись, база клиентов, расписание, прайс, портфолио и рассылки в MAX и Telegram." />
+    <meta name="twitter:title" content="Woner.ru — онлайн-запись и CRM для мастеров" />
+    <meta name="twitter:description" content="Woner.ru — онлайн-запись для мастеров и салонов. Расписание, клиенты, прайс и рассылки в MAX и Telegram." />
     <meta name="twitter:image" content="https://woner.ru/images/og-image.jpg" />
     <meta name="twitter:image:alt" content="Woner.ru — сервис онлайн записи клиентов" />
 
     <!-- Theme -->
     <meta name="theme-color" content="#6A5ACD" />
+
+    <!-- JSON-LD: WebSite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Woner.ru",
+      "alternateName": "Woner",
+      "url": "https://woner.ru/",
+      "description": "Онлайн-запись и CRM для мастеров и салонов красоты"
+    }
+    </script>
 
     <!-- JSON-LD: Organization -->
     <script type="application/ld+json">
@@ -198,21 +319,43 @@
     </script>
 
   </head>
-  <body>
+  <body style="margin:0;background:#fff">
     <noscript>
-      <div><img src="https://mc.yandex.ru/watch/110082756" style="position:absolute; left:-9999px;" alt="" /></div>
+      <div style="padding:16px;text-align:center;font-family:system-ui,sans-serif;color:#64748b">
+        Для работы сайта включите JavaScript.
+      </div>
     </noscript>
     <div id="root">
-      <div style="padding:24px;font-family:system-ui,-apple-system,sans-serif;color:#334155;text-align:center">
-        Загрузка Woner.ru…
+      <div class="woner-splash woner-splash--fullscreen" role="status" aria-live="polite" aria-label="Загрузка Woner.ru">
+        <div class="woner-splash__glow" aria-hidden="true"></div>
+        <div class="woner-splash__loader" aria-hidden="true">
+          <div class="woner-splash__ring woner-splash__ring--outer"></div>
+          <div class="woner-splash__ring woner-splash__ring--inner"></div>
+          <div class="woner-splash__core"></div>
+        </div>
+        <p class="woner-splash__brand"><span class="woner-splash__word">Woner</span><span class="woner-splash__tld">.ru</span></p>
+        <p class="woner-splash__status"><span>Загрузка</span><span class="woner-splash__dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
       </div>
     </div>
     <script>
-      window.setTimeout(function () {
-        var root = document.getElementById('root');
-        if (!root || root.dataset.mounted === '1') return;
-        window.__wonerBootError();
-      }, 30000);
+      (function () {
+        var ios = !!window.__wonerIsIOS;
+        var timeoutMs = ios ? 45000 : 30000;
+        var pingMs = ios ? 20000 : 12000;
+
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.dataset.mounted === '1') return;
+          window.__wonerReportBootFailure('BOOT_STILL_LOADING', { waitedMs: pingMs });
+        }, pingMs);
+
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.dataset.mounted === '1') return;
+          window.__wonerReportBootFailure('BOOT_TIMEOUT', { waitedMs: timeoutMs });
+          window.__wonerBootError('timeout');
+        }, timeoutMs);
+      })();
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

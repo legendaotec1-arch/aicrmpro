@@ -53,6 +53,7 @@ async function withBookingTransaction(db, fn) {
 }
 
 module.exports = {
+  hasOverlap,
   assertSlotAvailable,
   withBookingTransaction
 };

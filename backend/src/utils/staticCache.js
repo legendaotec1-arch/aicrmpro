@@ -19,7 +19,11 @@ function setStaticCacheHeaders(res, filePath) {
   }
 
   if (normalized.includes('/assets/')) {
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    const hashed = /\.[a-zA-Z0-9_-]{6,}\.(js|css|woff2?|map)$/.test(fileName);
+    res.setHeader(
+      'Cache-Control',
+      hashed ? 'public, max-age=31536000, immutable' : 'public, max-age=86400'
+    );
   }
 }
 

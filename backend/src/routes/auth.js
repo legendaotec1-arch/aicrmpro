@@ -184,7 +184,11 @@ router.post('/register', [
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Ошибка при регистрации' });
+    if (error.code === 'EXISTS') {
+      return res.status(400).json({ error: 'Мастер с таким email уже существует. Войдите по коду из письма.' });
+    }
+    const message = error.message || 'Ошибка при регистрации';
+    res.status(500).json({ error: message.includes('master_email_codes') ? 'Ошибка базы данных. Попробуйте через минуту.' : 'Ошибка при регистрации. Попробуйте ещё раз.' });
   }
 });
 
@@ -202,7 +206,10 @@ router.post('/login', [
     const email = String(req.body.email).trim().toLowerCase();
     const account = await findMasterAccountByEmail(email);
     if (!account) {
-      return res.status(404).json({ error: 'Аккаунт не найден. Создайте кабинет на странице регистрации.' });
+      return res.status(404).json({
+        error: 'Вы не зарегистрированы. Создайте кабинет на странице регистрации.',
+        code: 'NOT_REGISTERED',
+      });
     }
 
     if (account.role === 'team' && !account.team.email) {

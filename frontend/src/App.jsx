@@ -1,6 +1,8 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './lib/http.js';
+import { retryLoad } from './lib/retryLoad.js';
+import { Sentry } from './instrument.js';
 import { clearToken, getToken, saveToken } from './lib/authStorage.js';
 import { clearAdminToken, getAdminToken } from './lib/adminStorage.js';
 import adminApi from './lib/adminApi.js';
@@ -8,7 +10,7 @@ import { ToastProvider } from './context/ToastContext';
 import { PageLoader } from './components/ui/Spinner';
 
 import LandingPage from './pages/LandingPage';
-import ClientPage from './pages/ClientPage';
+const ClientPage = lazy(() => retryLoad(() => import('./pages/ClientPage')));
 import MasterLogin from './pages/MasterLogin';
 import MasterRegister from './pages/MasterRegister';
 import MasterDashboard from './pages/MasterDashboard';
@@ -17,7 +19,10 @@ import AdminDashboard from './pages/AdminDashboard';
 import OfferPage from './pages/legal/OfferPage';
 import PrivacyPage from './pages/legal/PrivacyPage';
 import PaymentPage from './pages/legal/PaymentPage';
+import PersonalDataConsentPage from './pages/legal/PersonalDataConsentPage';
 import YandexMetrika from './components/analytics/YandexMetrika';
+import CookieConsentBanner, { CookieConsentBootstrap } from './components/legal/CookieConsentBanner';
+import { isMessengerWebApp } from './lib/messengerWebApp';
 import AlternativeLandingPage from './pages/seo/AlternativeLandingPage';
 import ProgrammaticSeoPage from './pages/seo/ProgrammaticSeoPage';
 import SeoHubPage from './pages/seo/SeoHubPage';
@@ -35,6 +40,11 @@ import partnerApi from './lib/partnerApi.js';
 const AuthContext = createContext(null);
 
 api.interceptors.request.use((config) => {
+  const url = String(config.url || '');
+  // Клиентские запросы несут свой Bearer через withClientAuth — не подменять токеном мастера
+  if (config.headers?.Authorization || url.startsWith('/client/')) {
+    return config;
+  }
   const token = getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
@@ -53,8 +63,14 @@ function AuthProvider({ children }) {
   const verifyToken = async () => {
     try {
       const res = await api.get('/auth/verify');
-      if (res.data.valid) setUser(res.data.master);
-      else clearToken();
+      if (res.data.valid) {
+        setUser(res.data.master);
+        Sentry.setUser({
+          id: res.data.master?.id,
+          email: res.data.master?.email,
+          username: res.data.master?.salon_name || res.data.master?.name,
+        });
+      } else clearToken();
     } catch {
       clearToken();
     } finally {
@@ -76,6 +92,11 @@ function AuthProvider({ children }) {
     });
     saveToken(res.data.token);
     setUser(res.data.master);
+    Sentry.setUser({
+      id: res.data.master?.id,
+      email: res.data.master?.email,
+      username: res.data.master?.salon_name || res.data.master?.name,
+    });
     return res.data;
   };
 
@@ -85,6 +106,7 @@ function AuthProvider({ children }) {
   const logout = () => {
     clearToken();
     setUser(null);
+    Sentry.setUser(null);
   };
 
   return (
@@ -147,18 +169,33 @@ function PartnerProtectedRoute({ children }) {
 }
 
 function App() {
+  useEffect(() => {
+    const root = document.getElementById('root');
+    if (root) root.dataset.mounted = '1';
+  }, []);
+
   return (
     <ToastProvider>
       <AuthProvider>
         <BrowserRouter>
-          <YandexMetrika />
+          {!isMessengerWebApp() && <CookieConsentBootstrap />}
+          {!isMessengerWebApp() && <CookieConsentBanner />}
+          {!isMessengerWebApp() && <YandexMetrika />}
           <Routes>
             <Route path="/" element={<LandingPage />} />
-            <Route path="/m/:masterId" element={<ClientPage />} />
+            <Route
+              path="/m/:masterId"
+              element={(
+                <Suspense fallback={<PageLoader />}>
+                  <ClientPage />
+                </Suspense>
+              )}
+            />
             <Route path="/login" element={<MasterLogin />} />
             <Route path="/register" element={<MasterRegister />} />
             <Route path="/legal/offer" element={<OfferPage />} />
             <Route path="/legal/privacy" element={<PrivacyPage />} />
+            <Route path="/legal/personal-data-consent" element={<PersonalDataConsentPage />} />
             <Route path="/legal/payment" element={<PaymentPage />} />
             <Route path="/seo" element={<SeoHubPage />} />
             <Route path="/resheniya" element={<SeoSolutionsHubPage />} />

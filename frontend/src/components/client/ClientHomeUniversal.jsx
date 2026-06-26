@@ -4,6 +4,7 @@ import ClientHomeServices from './ClientHomeServices';
 import FullscreenImageViewer from './FullscreenImageViewer';
 import AddressMap from '../maps/AddressMap';
 import { mediaUrl } from '../../lib/media';
+import { messengerBackdropFilter } from '../../lib/messengerWebApp';
 
 const PREMIUM = {
   bgCard: 'rgba(255, 255, 255, 0.92)',
@@ -32,12 +33,13 @@ const PREMIUM = {
 };
 
 function PremiumCard({ children, style = {} }) {
+  const blur = messengerBackdropFilter(PREMIUM.blurHeavy);
   return (
     <div
       style={{
         background: PREMIUM.bgCard,
-        backdropFilter: PREMIUM.blurHeavy,
-        WebkitBackdropFilter: PREMIUM.blurHeavy,
+        backdropFilter: blur,
+        WebkitBackdropFilter: blur,
         border: `1px solid ${PREMIUM.borderCard}`,
         borderRadius: PREMIUM.radiusCard,
         boxShadow: PREMIUM.shadowCard,
@@ -200,6 +202,9 @@ export default function ClientHomeUniversal({
                     src={heroPhotoSrc}
                     alt=""
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
                     onError={() => setAvatarError(true)}
                   />
                 </button>
@@ -403,10 +408,11 @@ export default function ClientHomeUniversal({
                 }}
               >
                 <img
-                  src={mediaUrl(item.image_url)}
+                  src={mediaUrl(item.thumbnail_url || item.image_url)}
                   alt=""
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   loading="lazy"
+                  decoding="async"
                 />
               </button>
             ))}

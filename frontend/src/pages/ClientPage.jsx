@@ -1,7 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import Calendar from 'react-calendar';
-import 'react-calendar/dist/Calendar.css';
 import api from '../lib/http.js';
 import {
   CalendarDays,
@@ -17,18 +15,19 @@ import {
   ChevronLeft,
   X,
   Phone,
-  BadgeCheck
+  BadgeCheck,
+  Mail
 } from 'lucide-react';
 import ClientSalonHeader from '../components/client/ClientSalonHeader';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
-import { PageLoader } from '../components/ui/Spinner';
+import AppSplash from '../components/ui/AppSplash';
 import MessengerLabel from '../components/brand/MessengerLabel';
 import BrandName from '../components/brand/BrandName';
 import ClientAuthGate from '../components/client/ClientAuthGate';
 import ClientReviewsPanel from '../components/client/ClientReviewsPanel';
-import MasterCallButton from '../components/client/MasterCallButton';
+import MasterBookingContact, { pickMasterContact, bookingUnavailableContactHint } from '../components/client/MasterBookingContact';
 import ServiceCard from '../components/client/ServiceCard';
 import MasterVideoReel from '../components/client/MasterVideoReel';
 import ClientHomeUniversal from '../components/client/ClientHomeUniversal';
@@ -46,13 +45,32 @@ import {
 import { formatMasterPublicTitle, formatSalonMasterName } from '../lib/masterDisplay';
 import SalonMasterAvatar from '../components/client/SalonMasterAvatar';
 import { isRuPhoneComplete, normalizeRuPhoneForStorage } from '../lib/phoneRu';
+import PersonalDataConsentCheckbox from '../components/legal/PersonalDataConsentCheckbox';
 import { canSubmitBooking, getClientNameError, isValidClientName } from '../lib/clientBooking';
 import { mediaUrl } from '../lib/media';
-import { getClientSession, setClientSession, clearClientSession } from '../lib/clientSession';
+import { getClientSession, setClientSession, clearClientSession, clientSessionKeys, parseClientTokenParam, isClientSessionValid } from '../lib/clientSession';
 import { withClientAuth } from '../lib/clientApi';
-import SeoHead from '../seo/SeoHead';
-import JsonLd from '../seo/JsonLd';
+import { bootLog } from '../lib/bootLog';
+import { retryLoad } from '../lib/retryLoad';
+import { useSafeInterval, useMountedRef } from '../lib/usePageVisible';
+import { useLeadingThrottle } from '../lib/useThrottledCallback';
+import { iosBackdropFilter, iosScrollBehavior } from '../lib/iosPerf';
+import { useDocumentHead } from '../seo/useDocumentHead';
 import { buildMasterJsonLdBlocks, masterOgImage } from '../lib/masterSeo';
+import './client-page.css';
+import {
+  initMessengerWebApp,
+  isMessengerWebApp,
+  isMaxWebApp,
+  isTelegramWebApp,
+  getMessengerDeeplinkFromUrl,
+  sessionMatchesDeeplink,
+  messengerBackdropFilter,
+  messengerChannelLabel,
+  openBookingInSystemBrowser,
+} from '../lib/messengerWebApp';
+
+const BookingDateCalendar = lazy(() => retryLoad(() => import('../components/client/BookingDateCalendar')));
 
 // ============================================================
 // PREMIUM iOS DESIGN TOKENS — INLINE STYLES
@@ -109,6 +127,12 @@ const PREMIUM = {
   transitionSlow: 'all 0.3s ease-out',
 };
 
+if (typeof window !== 'undefined') {
+  PREMIUM.blurHeavy = iosBackdropFilter(PREMIUM.blurHeavy);
+  PREMIUM.blurMedium = iosBackdropFilter(PREMIUM.blurMedium);
+  PREMIUM.blurLight = iosBackdropFilter(PREMIUM.blurLight);
+}
+
 const CLIENT_TABS = [
   { id: 'home', label: 'Главная', Icon: Home },
   { id: 'booking', label: 'Запись', Icon: CalendarDays },
@@ -116,19 +140,149 @@ const CLIENT_TABS = [
   { id: 'reviews', label: 'Отзывы', Icon: Star }
 ];
 
+function waitForTelegramInitData(maxMs = 8000) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const check = () => {
+      const data = window.Telegram?.WebApp?.initData;
+      if (data) return resolve(data);
+      if (Date.now() - started >= maxMs) return resolve('');
+      window.setTimeout(check, 50);
+    };
+    check();
+  });
+}
+
 const BOOKING_STEPS = ['master', 'service', 'datetime', 'confirm'];
+
+const CONFIRM_CHANNELS = [
+  {
+    id: 'telegram',
+    title: 'Telegram',
+    description: 'Кнопка «Подтвердить запись» в боте',
+    hint: 'Напоминания за 24 ч и 3 ч придут в этот бот'
+  },
+  {
+    id: 'max',
+    title: 'MAX',
+    description: 'Кнопка «Подтвердить запись» в боте',
+    hint: 'Напоминания за 24 ч и 3 ч придут в этот бот'
+  },
+  {
+    id: 'email',
+    title: 'Email',
+    description: 'Код из письма на сайте',
+    hint: 'Подтверждение кодом — без push-напоминаний'
+  }
+];
+
+function ConfirmChannelCard({ channel, selected, onSelect, emphasize }) {
+  const meta = CONFIRM_CHANNELS.find((c) => c.id === channel);
+  if (!meta) return null;
+  const isSelected = selected === channel;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(channel)}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '12px',
+        width: '100%',
+        padding: '14px 16px',
+        borderRadius: '18px',
+        border: `2px solid ${isSelected ? PREMIUM.accent : emphasize ? 'rgba(106, 90, 205, 0.28)' : PREMIUM.borderLight}`,
+        background: isSelected ? PREMIUM.accentSoft : emphasize ? 'rgba(255, 255, 255, 0.92)' : PREMIUM.bgSoft,
+        cursor: 'pointer',
+        textAlign: 'left',
+        transition: PREMIUM.transition,
+        boxShadow: isSelected ? '0 4px 16px rgba(106, 90, 205, 0.18)' : emphasize ? '0 2px 10px rgba(106, 90, 205, 0.08)' : 'none',
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: '12px',
+          background: isSelected ? PREMIUM.accent : 'rgba(255,255,255,0.9)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {channel === 'email' ? (
+          <Mail size={20} color={isSelected ? '#fff' : PREMIUM.accent} />
+        ) : (
+          <MessengerLabel channel={channel} size="md" showName={false} className="!gap-0" />
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: '15px', fontWeight: '700', color: PREMIUM.textPrimary }}>{meta.title}</p>
+        <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '2px' }}>{meta.description}</p>
+        <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginTop: '6px', lineHeight: 1.4 }}>{meta.hint}</p>
+      </div>
+      {isSelected && <Check size={20} color={PREMIUM.accent} style={{ flexShrink: 0, marginTop: 2 }} />}
+    </button>
+  );
+}
+
+function BookingRequiredSection({ title, subtitle, children, incomplete = false }) {
+  return (
+    <div
+      style={{
+        padding: '16px',
+        borderRadius: '20px',
+        border: `2px solid ${incomplete ? 'rgba(234, 88, 12, 0.4)' : 'rgba(106, 90, 205, 0.32)'}`,
+        background: incomplete ? 'rgba(255, 247, 237, 0.55)' : 'rgba(106, 90, 205, 0.07)',
+        boxShadow: incomplete ? '0 0 0 3px rgba(234, 88, 12, 0.07)' : 'inset 0 1px 0 rgba(255,255,255,0.7)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '14px' }}>
+        <span
+          style={{
+            flexShrink: 0,
+            marginTop: '2px',
+            padding: '4px 10px',
+            borderRadius: '999px',
+            background: incomplete ? '#ea580c' : PREMIUM.accent,
+            color: '#fff',
+            fontSize: '10px',
+            fontWeight: '800',
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Обязательно
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: '15px', fontWeight: '700', color: PREMIUM.textPrimary, margin: 0, lineHeight: 1.3 }}>
+            {title}
+          </p>
+          {subtitle ? (
+            <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginTop: '4px', lineHeight: 1.45 }}>
+              {subtitle}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
 
 // ============================================================
 // PREMIUM CARD COMPONENT
 // ============================================================
 function PremiumCard({ children, style = {}, className = '' }) {
+  const blur = messengerBackdropFilter(PREMIUM.blurHeavy);
   return (
     <div
       className={className}
       style={{
         background: PREMIUM.bgCard,
-        backdropFilter: PREMIUM.blurHeavy,
-        WebkitBackdropFilter: PREMIUM.blurHeavy,
+        backdropFilter: blur,
+        WebkitBackdropFilter: blur,
         border: `1px solid ${PREMIUM.borderCard}`,
         borderRadius: PREMIUM.radiusCard,
         boxShadow: PREMIUM.shadowCard,
@@ -520,139 +674,34 @@ function PremiumTimeSlot({ time, selected, onClick }) {
 }
 
 // ============================================================
-// PREMIUM CALENDAR OVERRIDES
-// ============================================================
-const calendarCSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-.premium-calendar-wrap {
-  border-radius: 20px !important;
-  overflow: hidden !important;
-  background: rgba(255, 255, 255, 0.7) !important;
-  backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.4) !important;
-}
-
-.premium-calendar {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  font-family: 'Inter', system-ui, sans-serif !important;
-  width: 100% !important;
-}
-
-.premium-calendar .react-calendar__navigation {
-  margin-bottom: 8px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 8px !important;
-}
-
-.premium-calendar .react-calendar__navigation button {
-  color: #5C4038 !important;
-  font-weight: 700 !important;
-  font-size: 15px !important;
-  border-radius: 12px !important;
-  transition: all 0.2s ease !important;
-  min-width: 44px !important;
-  min-height: 44px !important;
-  background: rgba(255, 255, 255, 0.8) !important;
-  border: 1px solid rgba(255, 255, 255, 0.4) !important;
-  cursor: pointer !important;
-}
-
-.premium-calendar .react-calendar__navigation button:hover {
-  background: rgba(106, 90, 205, 0.1) !important;
-  color: #6A5ACD !important;
-}
-
-.premium-calendar .react-calendar__month-view__weekdays__weekday {
-  font-size: 11px !important;
-  font-weight: 700 !important;
-  color: #999999 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
-  text-align: center !important;
-}
-
-.premium-calendar .react-calendar__tile {
-  aspect-ratio: 1 !important;
-  border-radius: 14px !important;
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  color: #5C4038 !important;
-  transition: all 0.2s ease !important;
-  cursor: pointer !important;
-  background: transparent !important;
-  border: none !important;
-  min-width: 40px !important;
-  min-height: 40px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-.premium-calendar .react-calendar__tile:hover {
-  background: rgba(106, 90, 205, 0.1) !important;
-  color: #6A5ACD !important;
-}
-
-.premium-calendar .react-calendar__tile--now {
-  background: rgba(106, 90, 205, 0.08) !important;
-  color: #6A5ACD !important;
-  font-weight: 700 !important;
-}
-
-.premium-calendar .react-calendar__tile--active {
-  background: linear-gradient(135deg, #6A5ACD 0%, #5A4CBD 100%) !important;
-  color: #fff !important;
-  font-weight: 700 !important;
-  border-radius: 14px !important;
-  box-shadow: 0 4px 16px rgba(106, 90, 205, 0.35) !important;
-}
-
-.premium-calendar .react-calendar__tile--selected {
-  background: linear-gradient(135deg, #6A5ACD 0%, #5A4CBD 100%) !important;
-  color: #fff !important;
-  border-radius: 14px !important;
-}
-
-.premium-calendar .react-calendar__tile:disabled {
-  color: #C8B8AE !important;
-  background: transparent !important;
-  cursor: not-allowed !important;
-}
-
-.premium-calendar .react-calendar__navigation__next2-label,
-.premium-calendar .react-calendar__navigation__prev2-label {
-  display: none !important;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-`;
-
-// Inject calendar CSS
-if (typeof document !== 'undefined') {
-  const styleId = 'premium-calendar-styles';
-  if (!document.getElementById(styleId)) {
-    const styleEl = document.createElement('style');
-    styleEl.id = styleId;
-    styleEl.textContent = calendarCSS;
-    document.head.appendChild(styleEl);
-  }
-}
-
-// ============================================================
 // MAIN CLIENT PAGE COMPONENT
 // ============================================================
+function WebAppAuthPrompt({ authPending, onRetry, channelLabel }) {
+  return (
+    <PremiumCard style={{ padding: '32px', textAlign: 'center' }}>
+      <p style={{ fontSize: '15px', color: PREMIUM.textSecondary, marginBottom: '16px' }}>
+        {authPending ? `Входим через ${channelLabel}…` : `Не удалось войти через ${channelLabel}`}
+      </p>
+      {authPending ? (
+        <AppSplash fullScreen={false} label="Вход" />
+      ) : (
+        <Button type="button" onClick={onRetry}>
+          Повторить вход
+        </Button>
+      )}
+    </PremiumCard>
+  );
+}
+
 export default function ClientPage() {
   const { masterId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    bootLog('CLIENT_PAGE_MOUNT', { masterId });
+  }, [masterId]);
   const [master, setMaster] = useState(null);
   const [pageSeo, setPageSeo] = useState(null);
   const [bookingConfig, setBookingConfig] = useState(null);
@@ -663,7 +712,18 @@ export default function ClientPage() {
   const [selectedSalonMaster, setSelectedSalonMaster] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [reviewSummary, setReviewSummary] = useState({ count: 0, average: null });
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab && CLIENT_TABS.some((item) => item.id === tab)) return tab;
+    } catch {
+      /* ignore */
+    }
+    return 'home';
+  });
+  const handleTabChange = useLeadingThrottle((id) => {
+    setActiveTab((prev) => (prev === id ? prev : id));
+  }, 300);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -672,16 +732,51 @@ export default function ClientPage() {
   const [confirmDialog, setConfirmDialog] = useState(null); // { type: 'cancel'|'reschedule', appointment }
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [formData, setFormData] = useState({ name: '', phone: '+7' });
+  const [pdConsent, setPdConsent] = useState(false);
+  const [confirmChannel, setConfirmChannel] = useState(null);
+  const [confirmEmail, setConfirmEmail] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [pendingToken, setPendingToken] = useState(null);
+  const [confirmPhase, setConfirmPhase] = useState('choose');
+  const [confirmedChannel, setConfirmedChannel] = useState(null);
+  const [botDeepLink, setBotDeepLink] = useState(null);
+  const [confirmError, setConfirmError] = useState('');
   const bookingFormRef = useRef(null);
+  const confirmRequestRef = useRef(false);
   const reschedulePrefillRef = useRef(null);
   const identifySyncKeyRef = useRef('');
   const slotsRequestIdRef = useRef(0);
+  const loadMasterInFlightRef = useRef(null);
+  const mountedRef = useMountedRef();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [booking, setBooking] = useState(false);
-  const [clientAuth, setClientAuth] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [authPending, setAuthPending] = useState(false);
+  const inWebApp = isMessengerWebApp();
+  const webAppChannelLabel = messengerChannelLabel();
+  const [clientAuth, setClientAuth] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('a')) return null;
+    const deeplink = getMessengerDeeplinkFromUrl(window.location.search);
+    const session = getClientSession(masterId);
+    if (deeplink && isClientSessionValid(session) && !sessionMatchesDeeplink(session, deeplink)) {
+      clearClientSession(masterId);
+      return null;
+    }
+    return isClientSessionValid(session) ? session : null;
+  });
+  const [authChecked, setAuthChecked] = useState(true);
+  const [authRetryNonce, setAuthRetryNonce] = useState(0);
+  const [authPending, setAuthPending] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('a')) return true;
+    const deeplink = getMessengerDeeplinkFromUrl(window.location.search);
+    const session = getClientSession(masterId);
+    if (deeplink) {
+      return !sessionMatchesDeeplink(session, deeplink);
+    }
+    return isMessengerWebApp();
+  });
   const [rescheduleId, setRescheduleId] = useState(null);
   const [rescheduleLoading, setRescheduleLoading] = useState(false);
   const [appointments, setAppointments] = useState([]);
@@ -692,8 +787,33 @@ export default function ClientPage() {
   const [bookingSuccessWasReschedule, setBookingSuccessWasReschedule] = useState(false);
 
   const clientThemeId = master?.client_theme || DEFAULT_CLIENT_THEME;
+  const apiSalonId = master?.id || null;
+
+  useEffect(() => {
+    initMessengerWebApp();
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadTimedOut(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setLoadTimedOut(true), 12000);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
+
+  const retryWebAppAuth = useCallback(() => {
+    setAuthPending(true);
+    setAuthRetryNonce((value) => value + 1);
+  }, []);
 
   const resolveAuthFromUrl = useCallback(() => {
+    const ct = searchParams.get('ct');
+    if (ct) {
+      const fromCt = parseClientTokenParam(ct);
+      if (fromCt) return fromCt;
+    }
+
     const tab = searchParams.get('tab');
     const reschedule = searchParams.get('reschedule');
 
@@ -704,10 +824,13 @@ export default function ClientPage() {
       setStep('master');
     }
 
-    return getClientSession(masterId);
-  }, [masterId, searchParams]);
+    return getClientSession(...clientSessionKeys(masterId, master));
+  }, [masterId, master?.id, master?.public_slug, searchParams]);
 
   const loadMasterData = useCallback(async () => {
+    if (loadMasterInFlightRef.current) return loadMasterInFlightRef.current;
+    const run = (async () => {
+    bootLog('LOAD_MASTER_START', { masterId });
     try {
       setLoading(true);
       setLoadError(null);
@@ -736,42 +859,151 @@ export default function ClientPage() {
       setReviewSummary(res.data.reviewSummary || { count: 0, average: null });
       setReviews(res.data.reviews || []);
       setPageSeo(res.data.seo || null);
+      bootLog('LOAD_MASTER_OK', {
+        masterId,
+        salonId: res.data?.master?.id,
+        services: flat.length,
+        team: masters.length,
+      });
+      bootLog('LOAD_SERVICES_OK', { masterId, count: flat.length });
     } catch (err) {
       console.error(err);
+      bootLog('LOAD_MASTER_FAIL', { masterId, status: err.response?.status });
       const msg = err.response?.data?.error || (err.message !== 'Error' ? err.message : null);
       setLoadError(msg || (err.response?.status === 404 ? 'Мастер не найден' : 'Не удалось загрузить страницу'));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
-  }, [masterId]);
+    })();
+    loadMasterInFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      if (loadMasterInFlightRef.current === run) loadMasterInFlightRef.current = null;
+    }
+  }, [masterId, mountedRef]);
 
   const loadAppointments = useCallback(async () => {
-    if (!clientAuth) return;
+    if (!isClientSessionValid(clientAuth) || authPending) return;
     setAppointmentsLoading(true);
     try {
       const res = await api.get(
         `/client/my/${encodeURIComponent(clientAuth.userId)}`,
         withClientAuth(clientAuth, {
-          params: { channel: clientAuth.channel, masterId }
+          params: { channel: clientAuth.channel, masterId: apiSalonId || masterId }
         })
       );
       setAppointments(res.data || []);
     } catch (err) {
+      if (err.response?.status === 401) {
+        clearClientSession(...clientSessionKeys(masterId, master));
+        if (mountedRef.current) {
+          setClientAuth(null);
+          identifySyncKeyRef.current = '';
+        }
+        return;
+      }
       console.error(err);
     } finally {
-      setAppointmentsLoading(false);
+      if (mountedRef.current) setAppointmentsLoading(false);
     }
-  }, [clientAuth, masterId]);
+  }, [clientAuth, masterId, apiSalonId, authPending, master, mountedRef]);
+
+  useEffect(() => {
+    const code = searchParams.get('a');
+    if (!code) return undefined;
+
+    let cancelled = false;
+    setAuthPending(true);
+    bootLog('AUTH_OPEN_CODE_START', { masterId, code: code.slice(0, 4) + '…' });
+    clearClientSession(...clientSessionKeys(masterId, master));
+    setClientAuth(null);
+    identifySyncKeyRef.current = '';
+
+    (async () => {
+      try {
+        bootLog('AUTH_REQUEST_SENT', { masterId });
+        const res = await api.post('/client/auth/open-code', { code, masterId });
+        bootLog('AUTH_RESPONSE_RECEIVED', { masterId, status: res.status });
+        if (cancelled) return;
+        const session = {
+          channel: res.data.channel,
+          userId: res.data.userId,
+          clientToken: res.data.clientToken,
+        };
+        const keys = [...clientSessionKeys(masterId, master), res.data.salonId].filter(Boolean);
+        setClientSession(keys, session);
+        setClientAuth(session);
+        bootLog('AUTH_TOKEN_SAVED', { masterId, channel: session.channel });
+        bootLog('AUTH_OPEN_CODE_OK', { masterId, channel: session.channel });
+        bootLog('URL_CLEANUP_START', { masterId });
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('a');
+          return next;
+        }, { replace: true });
+        bootLog('URL_CLEANUP_OK', { masterId });
+      } catch (err) {
+        console.error('open-code auth failed', err);
+        bootLog('AUTH_OPEN_CODE_FAIL', {
+          masterId,
+          status: err.response?.status,
+          code: err.code,
+          message: String(err.message || '').slice(0, 80),
+        });
+      } finally {
+        if (!cancelled) setAuthPending(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [masterId, master?.id, master?.public_slug, searchParams.get('a'), setSearchParams, master]);
+
+  useEffect(() => {
+    const ct = searchParams.get('ct');
+    if (!ct) return undefined;
+    const session = parseClientTokenParam(ct);
+    if (!session) return undefined;
+    const keys = clientSessionKeys(masterId, master);
+    setClientSession(keys, session);
+    setClientAuth(session);
+    setAuthPending(false);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('ct');
+      return next;
+    }, { replace: true });
+    return undefined;
+  }, [masterId, master?.id, master?.public_slug, searchParams, setSearchParams]);
 
   useEffect(() => {
     const session = resolveAuthFromUrl();
-    setClientAuth(session?.clientToken ? session : null);
-    const hasDeeplinkParams = Boolean(
-      searchParams.get('uid') && searchParams.get('exp') && searchParams.get('sig')
-        && (searchParams.get('ch') === 'max' || searchParams.get('ch') === 'telegram')
-    );
-    const inTelegramWebApp = Boolean((window.Telegram?.WebApp?.initData || '').length);
-    setAuthPending(hasDeeplinkParams || inTelegramWebApp);
+    const validSession = isClientSessionValid(session) ? session : null;
+    setClientAuth((prev) => {
+      if (validSession?.clientToken) {
+        if (
+          prev?.clientToken === validSession.clientToken
+          && prev?.channel === validSession.channel
+          && prev?.userId === validSession.userId
+        ) {
+          return prev;
+        }
+        return validSession;
+      }
+      if (isClientSessionValid(prev)) return prev;
+      return null;
+    });
+    const deeplink = getMessengerDeeplinkFromUrl(searchParams.toString() ? `?${searchParams.toString()}` : '');
+    const hasDeeplinkParams = Boolean(deeplink);
+    const hasOpenCode = Boolean(searchParams.get('a'));
+    const hasSession = Boolean(validSession?.clientToken);
+    const needsDeeplinkAuth = hasDeeplinkParams && !sessionMatchesDeeplink(validSession, deeplink);
+    setAuthPending((pending) => {
+      if (needsDeeplinkAuth) return true;
+      if (hasSession) return false;
+      if (hasOpenCode || hasDeeplinkParams || isMessengerWebApp()) return true;
+      return pending;
+    });
     setAuthChecked(true);
   }, [resolveAuthFromUrl, searchParams]);
 
@@ -782,117 +1014,200 @@ export default function ClientPage() {
   }, [authPending]);
 
   useEffect(() => {
-    if (!masterId || clientAuth?.clientToken) return;
+    const deeplink = getMessengerDeeplinkFromUrl(searchParams.toString() ? `?${searchParams.toString()}` : window.location.search);
+    const hasDeeplink = Boolean(deeplink);
+    const needsDeeplinkAuth = hasDeeplink && !sessionMatchesDeeplink(clientAuth, deeplink);
 
-    const initData = window.Telegram?.WebApp?.initData;
-    if (initData) {
-      let cancelled = false;
-      (async () => {
-        try {
-          const res = await api.post('/client/auth/telegram-webapp', { masterId, initData });
-          if (cancelled) return;
-          const session = {
-            channel: 'telegram',
-            userId: res.data.userId,
-            firstName: res.data.firstName || undefined,
-            photoUrl: res.data.photoUrl || undefined,
-            clientToken: res.data.clientToken
-          };
-          setClientSession(masterId, session);
-          setClientAuth(session);
-          window.Telegram?.WebApp?.ready?.();
-        } catch (err) {
-          console.error('telegram webapp auth failed', err);
-        } finally {
-          if (!cancelled) setAuthPending(false);
-        }
-      })();
-      return () => { cancelled = true; };
-    }
+    if (!masterId || (isClientSessionValid(clientAuth) && !needsDeeplinkAuth)) return;
 
-    const ch = searchParams.get('ch');
-    const uid = searchParams.get('uid');
-    const exp = searchParams.get('exp');
-    const sig = searchParams.get('sig');
-    if (!uid || !exp || !sig || (ch !== 'max' && ch !== 'telegram')) {
-      setAuthPending(false);
-      return;
-    }
+    const ch = deeplink?.channel || searchParams.get('ch');
+    const uid = deeplink?.userId || searchParams.get('uid');
+    const exp = deeplink?.exp || searchParams.get('exp');
+    const sig = deeplink?.sig || searchParams.get('sig');
 
     let cancelled = false;
+
+    const applyTabFromUrl = () => {
+      const tab = searchParams.get('tab');
+      if (tab && CLIENT_TABS.some((item) => item.id === tab)) setActiveTab(tab);
+      const reschedule = searchParams.get('reschedule');
+      if (reschedule) {
+        setRescheduleId(reschedule);
+        setActiveTab('booking');
+        setStep('master');
+      }
+    };
+
+    const clearDeeplinkParams = () => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        ['ch', 'uid', 'fn', 'photo', 'exp', 'sig'].forEach((key) => next.delete(key));
+        return next;
+      }, { replace: true });
+    };
+
+    const runDeeplinkAuth = async () => {
+      bootLog('AUTH_DEEPLINK_START', { masterId, channel: ch });
+      const res = await api.post('/client/auth/deeplink', {
+        masterId,
+        channel: ch,
+        userId: uid,
+        exp,
+        sig,
+        firstName: searchParams.get('fn') || undefined,
+        photoUrl: searchParams.get('photo') || undefined
+      });
+      if (cancelled) return;
+      const session = {
+        channel: res.data.channel || ch,
+        userId: res.data.userId || uid,
+        firstName: res.data.firstName || searchParams.get('fn') || undefined,
+        photoUrl: res.data.photoUrl || searchParams.get('photo') || undefined,
+        clientToken: res.data.clientToken
+      };
+      const sessionKeys = [...clientSessionKeys(masterId, master), res.data.salonId].filter(Boolean);
+      setClientSession(sessionKeys, session);
+      setClientAuth(session);
+      clearDeeplinkParams();
+      applyTabFromUrl();
+      setAuthPending(false);
+      bootLog('AUTH_DEEPLINK_OK', { masterId, channel: session.channel });
+    };
+
     (async () => {
-      try {
-        const res = await api.post('/client/auth/deeplink', {
-          masterId,
-          channel: ch,
-          userId: uid,
-          exp,
-          sig,
-          firstName: searchParams.get('fn') || undefined,
-          photoUrl: searchParams.get('photo') || undefined
-        });
+      if (hasDeeplink) {
+        try {
+          await runDeeplinkAuth();
+          return;
+        } catch (err) {
+          console.error('deeplink auth failed', err);
+          bootLog('AUTH_DEEPLINK_FAIL', {
+            masterId,
+            status: err.response?.status,
+            message: String(err.message || '').slice(0, 80),
+          });
+        }
+      }
+
+      const telegramDeeplink = ch === 'telegram' && Boolean(uid);
+      if (!isMaxWebApp() && !telegramDeeplink) {
+        const initData = await waitForTelegramInitData(isTelegramWebApp() ? 8000 : 1500);
         if (cancelled) return;
-        const session = {
-          channel: res.data.channel || ch,
-          userId: res.data.userId || uid,
-          firstName: res.data.firstName || searchParams.get('fn') || undefined,
-          photoUrl: res.data.photoUrl || searchParams.get('photo') || undefined,
-          clientToken: res.data.clientToken
-        };
-        setClientSession(masterId, session);
-        setClientAuth(session);
-        setSearchParams((prev) => {
-          const next = new URLSearchParams(prev);
-          ['ch', 'uid', 'fn', 'photo', 'exp', 'sig'].forEach((key) => next.delete(key));
-          return next;
-        }, { replace: true });
+
+        if (initData) {
+          try {
+            const res = await api.post('/client/auth/telegram-webapp', { masterId, initData });
+            if (cancelled) return;
+            const session = {
+              channel: 'telegram',
+              userId: res.data.userId,
+              firstName: res.data.firstName || undefined,
+              photoUrl: res.data.photoUrl || undefined,
+              clientToken: res.data.clientToken
+            };
+            const keys = [...clientSessionKeys(masterId, master), res.data.salonId].filter(Boolean);
+            setClientSession(keys, session);
+            setClientAuth(session);
+            applyTabFromUrl();
+            initMessengerWebApp();
+            setAuthPending(false);
+            return;
+          } catch (err) {
+            console.error('telegram webapp auth failed', err);
+            if (!hasDeeplink) {
+              if (!cancelled) setAuthPending(false);
+              return;
+            }
+          }
+        }
+      }
+
+      if (!hasDeeplink) {
+        if (!cancelled) setAuthPending(false);
+        return;
+      }
+
+      try {
+        await runDeeplinkAuth();
       } catch (err) {
-        console.error('deeplink auth failed', err);
+        console.error('deeplink auth retry failed', err);
       } finally {
         if (!cancelled) setAuthPending(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [masterId, searchParams, setSearchParams, clientAuth?.clientToken]);
+  }, [masterId, master?.id, master?.public_slug, searchParams, setSearchParams, clientAuth?.clientToken, authRetryNonce]);
 
   useEffect(() => {
     loadMasterData();
   }, [loadMasterData]);
 
+  const bookingReadyLoggedRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || !master) return;
+    if (authPending) return;
+    if (bookingReadyLoggedRef.current) return;
+    bookingReadyLoggedRef.current = true;
+    bootLog('BOOKING_READY', {
+      masterId,
+      tab: activeTab,
+      authed: isClientSessionValid(clientAuth),
+    });
+  }, [loading, master, authPending, masterId, activeTab, clientAuth]);
+
+  useEffect(() => {
+    if (!clientAuth?.clientToken) return;
+    const keys = clientSessionKeys(masterId, master);
+    if (!keys.length) return;
+    setClientSession(keys, clientAuth);
+  }, [master?.id, master?.public_slug, masterId, clientAuth?.clientToken, clientAuth?.channel, clientAuth?.userId]);
+
   useEffect(() => {
     const slug = master?.public_slug;
     if (!slug || masterId === slug) return;
+    const hasDeeplink = Boolean(
+      searchParams.get('uid') && searchParams.get('exp') && searchParams.get('sig')
+    );
+    if (hasDeeplink && !clientAuth?.clientToken) return;
+    if (authPending) return;
     navigate(`/m/${slug}${location.search}${location.hash}`, { replace: true });
-  }, [master?.public_slug, masterId, navigate, location.search, location.hash]);
+  }, [master?.public_slug, masterId, navigate, location.search, location.hash, searchParams, clientAuth?.clientToken, authPending]);
 
   const masterJsonLd = useMemo(
     () => (master ? buildMasterJsonLdBlocks(master, priceList, reviewSummary) : []),
     [master, priceList, reviewSummary]
   );
 
-  const masterSeoHead = master && pageSeo ? (
-    <>
-      <SeoHead
-        title={pageSeo.title}
-        description={pageSeo.description}
-        canonical={pageSeo.canonical}
-        robots={pageSeo.indexable === false ? 'noindex, follow' : 'index, follow'}
-        ogImage={masterOgImage(master)}
-      />
-      <JsonLd blocks={masterJsonLd} />
-    </>
-  ) : null;
+  const isBookingApp = import.meta.env.VITE_BOOKING_APP === '1';
+
+  const documentHeadConfig = useMemo(() => {
+    if (isBookingApp || loading || !master || !pageSeo) return null;
+    return {
+      title: pageSeo.title,
+      description: pageSeo.description,
+      canonical: pageSeo.canonical,
+      robots: pageSeo.indexable === false ? 'noindex, follow' : 'index, follow',
+      ogImage: masterOgImage(master),
+      jsonLdBlocks: masterJsonLd,
+    };
+  }, [isBookingApp, loading, master, pageSeo, masterJsonLd]);
+
+  useDocumentHead(documentHeadConfig);
 
   useEffect(() => {
-    if (clientAuth) loadAppointments();
-  }, [clientAuth, loadAppointments]);
+    if (!isClientSessionValid(clientAuth) || authPending) return;
+    loadAppointments();
+  }, [clientAuth, authPending, loadAppointments]);
 
   useEffect(() => {
-    if (selectedDate && master && clientAuth && selectedSalonMaster) loadSlots();
+    if (!selectedDate || !apiSalonId || !selectedSalonMaster) return undefined;
+    const timer = window.setTimeout(() => { loadSlots(); }, 300);
+    return () => window.clearTimeout(timer);
   }, [
     selectedDate,
-    master,
+    apiSalonId,
     clientAuth?.userId,
     clientAuth?.channel,
     selectedSalonMaster?.id,
@@ -908,9 +1223,9 @@ export default function ClientPage() {
   }, [clientAuth?.firstName, formData.name]);
 
   useEffect(() => {
-    if (!clientAuth?.clientToken || !masterId) return;
+    if (!isClientSessionValid(clientAuth) || !(apiSalonId || masterId)) return;
     const syncKey = [
-      masterId,
+      apiSalonId || masterId,
       clientAuth.channel,
       clientAuth.userId,
       formData.name,
@@ -920,7 +1235,7 @@ export default function ClientPage() {
     identifySyncKeyRef.current = syncKey;
 
     api.post('/client/identify', {
-      masterId,
+      masterId: apiSalonId || masterId,
       channel: clientAuth.channel,
       userId: clientAuth.userId,
       name: isValidClientName(formData.name)
@@ -933,11 +1248,30 @@ export default function ClientPage() {
     }, withClientAuth(clientAuth))
       .then((res) => {
         if (!res.data?.clientToken) return;
-        setClientSession(masterId, { ...clientAuth, clientToken: res.data.clientToken });
-        setClientAuth((prev) => (prev ? { ...prev, clientToken: res.data.clientToken } : prev));
+        setClientSession(clientSessionKeys(masterId, master), { ...clientAuth, clientToken: res.data.clientToken });
+        setClientAuth((prev) => {
+          if (!prev || prev.clientToken === res.data.clientToken) return prev;
+          return { ...prev, clientToken: res.data.clientToken };
+        });
       })
-      .catch(() => {});
-  }, [masterId, clientAuth?.userId, clientAuth?.channel, formData.name, formData.phone]);
+      .catch((err) => {
+        if (err.response?.status === 401) {
+          clearClientSession(...clientSessionKeys(masterId, master));
+          setClientAuth(null);
+          identifySyncKeyRef.current = '';
+        }
+      });
+  }, [
+    apiSalonId,
+    masterId,
+    clientAuth?.channel,
+    clientAuth?.userId,
+    clientAuth?.clientToken,
+    formData.name,
+    formData.phone,
+    master,
+    mountedRef,
+  ]);
 
   useEffect(() => {
     reschedulePrefillRef.current = null;
@@ -1000,10 +1334,10 @@ export default function ClientPage() {
   }, [rescheduleId, clientAuth, master?.id, teamMasters, priceGroups, priceList, setSearchParams]);
 
   const handleAuthenticated = useCallback((session) => {
-    setClientSession(masterId, session);
+    setClientSession(clientSessionKeys(masterId, master), session);
     setClientAuth(session);
     if (session.firstName) setFormData((prev) => ({ ...prev, name: prev.name || session.firstName }));
-  }, [masterId]);
+  }, [masterId, master?.id, master?.public_slug]);
 
   const loadSlots = async () => {
     const requestId = ++slotsRequestIdRef.current;
@@ -1012,14 +1346,14 @@ export default function ClientPage() {
       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
       const day = String(selectedDate.getDate()).padStart(2, '0');
       const dateStr = `${year}-${month}-${day}`;
-      if (!selectedSalonMaster?.id) return;
+      if (!selectedSalonMaster?.id || !apiSalonId) return;
       const params = new URLSearchParams({
         date: dateStr,
         salonMasterId: selectedSalonMaster.id,
         durationMinutes: String(selectedService?.duration_minutes || 60)
       });
       if (rescheduleId) params.set('excludeAppointmentId', rescheduleId);
-      const res = await api.get(`/client/${masterId}/slots?${params.toString()}`);
+      const res = await api.get(`/client/${apiSalonId}/slots?${params.toString()}`);
       if (requestId !== slotsRequestIdRef.current) return;
       const slots = res.data || [];
       setAvailableSlots(slots);
@@ -1048,6 +1382,7 @@ export default function ClientPage() {
     [master?.timezone, bookingConfig?.timezone]
   );
   const salonTimezoneLabel = master?.timezoneLabel || bookingConfig?.timezoneLabel || salonTimezone;
+  const bookingUnavailableContact = useMemo(() => pickMasterContact(master), [master]);
   const selectedSlotLocalHint = selectedSlot ? clientLocalHint(selectedSlot, salonTimezone) : null;
 
   const openMedia = (items, index) => setMediaViewer({ items, index });
@@ -1076,7 +1411,7 @@ export default function ClientPage() {
     setSelectedSlot(null);
     setStep('datetime');
     setActiveTab('booking');
-    setTimeout(() => document.getElementById('booking-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    setTimeout(() => document.getElementById('booking-card')?.scrollIntoView({ behavior: iosScrollBehavior(), block: 'start' }), 50);
   };
 
   const selectBookingService = (item) => {
@@ -1087,13 +1422,70 @@ export default function ClientPage() {
 
   useEffect(() => {
     if (step === 'form' && selectedSlot) {
-      setTimeout(() => bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+      setTimeout(() => bookingFormRef.current?.scrollIntoView({ behavior: iosScrollBehavior(), block: 'start' }), 80);
     }
   }, [step, selectedSlot]);
 
+  const resetConfirmFlow = () => {
+    setConfirmChannel(null);
+    setConfirmEmail('');
+    setEmailCode('');
+    setPendingToken(null);
+    setConfirmPhase('choose');
+    setBotDeepLink(null);
+    setConfirmError('');
+  };
+
+  const confirmPolling = confirmPhase === 'waiting' && Boolean(pendingToken);
+
+  useSafeInterval(() => {
+    if (!pendingToken) return;
+    (async () => {
+      try {
+        const res = await api.get(`/client/booking/confirm-status/${pendingToken}`);
+        if (!mountedRef.current) return;
+        if (res.data?.status === 'confirmed') {
+          setConfirmedChannel(confirmChannel);
+          setStep('done');
+          setConfirmPhase('choose');
+          resetConfirmFlow();
+          if (isClientSessionValid(clientAuth)) await loadAppointments();
+        } else if (res.data?.status === 'expired') {
+          setConfirmError(res.data?.cancelReason || 'Не удалось подтвердить. Выберите другое время.');
+          setConfirmPhase('choose');
+          setPendingToken(null);
+          setStep('datetime');
+          setSelectedSlot(null);
+        }
+      } catch {
+        /* ignore transient poll errors */
+      }
+    })();
+  }, 3000, confirmPolling);
+
+  const handleConfirmEmailCode = async () => {
+    if (!pendingToken || !/^\d{6}$/.test(emailCode.trim())) {
+      setConfirmError('Введите 6-значный код из письма');
+      return;
+    }
+    setBooking(true);
+    setConfirmError('');
+    try {
+      await api.post('/client/booking/confirm-email', { token: pendingToken, code: emailCode.trim() });
+      setConfirmedChannel('email');
+      setStep('done');
+      resetConfirmFlow();
+      if (isClientSessionValid(clientAuth)) await loadAppointments();
+    } catch (err) {
+      setConfirmError(err.response?.data?.error || 'Неверный код');
+    } finally {
+      setBooking(false);
+    }
+  };
+
   const handleBooking = async (e) => {
     e.preventDefault();
-    if (!selectedSlot || !selectedService || !clientAuth) return;
+    if (!selectedSlot || !selectedService) return;
 
     const nameError = getClientNameError(formData.name);
     if (nameError) {
@@ -1104,39 +1496,98 @@ export default function ClientPage() {
       alert('Укажите номер телефона полностью в формате +7 999 123 4567');
       return;
     }
+    if (!pdConsent) {
+      setConfirmError('Для оформления записи необходимо согласие на обработку персональных данных');
+      return;
+    }
+
+    if (rescheduleId) {
+      if (!clientAuth) {
+        alert('Для переноса записи войдите через мессенджер');
+        return;
+      }
+      setBooking(true);
+      const wasRescheduling = true;
+      try {
+        const payload = {
+          masterId: apiSalonId || masterId,
+          salonMasterId: selectedSalonMaster?.id,
+          channel: clientAuth.channel,
+          name: formData.name.trim(),
+          phone: normalizeRuPhoneForStorage(formData.phone),
+          appointmentTime: selectedSlot,
+          serviceName: selectedService.name,
+          servicePrice: selectedService.price,
+          duration: selectedService.duration_minutes,
+          photoUrl: clientAuth.photoUrl || undefined
+        };
+        if (clientAuth.channel === 'telegram') payload.telegramUserId = clientAuth.userId;
+        else payload.maxUserId = clientAuth.userId;
+        await api.put(`/client/appointment/${rescheduleId}/reschedule`, payload, withClientAuth(clientAuth));
+        setStep('done');
+        setBookingSuccessWasReschedule(wasRescheduling);
+        setRescheduleId(null);
+        await loadAppointments();
+      } catch (err) {
+        alert(err.response?.data?.error || 'Ошибка записи');
+      } finally {
+        setBooking(false);
+      }
+      return;
+    }
+
+    if (confirmPhase === 'waiting' && pendingToken) return;
+
+    if (!confirmChannel) {
+      setConfirmError('Выберите способ подтверждения записи');
+      return;
+    }
+    if (confirmChannel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(confirmEmail.trim())) {
+      setConfirmError('Укажите корректный email');
+      return;
+    }
+
+    if (confirmRequestRef.current) return;
+    confirmRequestRef.current = true;
     setBooking(true);
-    const wasRescheduling = !!rescheduleId;
+    setConfirmError('');
     try {
       const payload = {
-        masterId,
+        masterId: apiSalonId || masterId,
         salonMasterId: selectedSalonMaster?.id,
-        channel: clientAuth.channel,
+        channel: confirmChannel,
         name: formData.name.trim(),
         phone: normalizeRuPhoneForStorage(formData.phone),
         appointmentTime: selectedSlot,
         serviceName: selectedService.name,
         servicePrice: selectedService.price,
-        duration: selectedService.duration_minutes,
-        photoUrl: clientAuth.photoUrl || undefined
+        duration: selectedService.duration_minutes
       };
-      if (clientAuth.channel === 'telegram') payload.telegramUserId = clientAuth.userId;
-      else payload.maxUserId = clientAuth.userId;
-
-      if (rescheduleId) {
-        await api.put(`/client/appointment/${rescheduleId}/reschedule`, payload, withClientAuth(clientAuth));
-      } else {
-        console.log('[book] Запись на услугу:', payload);
-        await api.post('/client/book', payload, withClientAuth(clientAuth));
+      if (confirmChannel === 'email') {
+        payload.email = confirmEmail.trim().toLowerCase();
+      }
+      if (confirmChannel === 'telegram' && clientAuth?.channel === 'telegram') {
+        payload.telegramUserId = clientAuth.userId;
+      }
+      if (confirmChannel === 'max' && clientAuth?.channel === 'max') {
+        payload.maxUserId = clientAuth.userId;
       }
 
-      setStep('done');
-      setBookingSuccessWasReschedule(wasRescheduling);
-      if (wasRescheduling) setRescheduleId(null);
-      await loadAppointments();
+      const res = await api.post('/client/booking/request-confirm', payload);
+      const token = res.data?.token;
+      setPendingToken(token);
+      setBotDeepLink(res.data?.botDeepLink || null);
+
+      if (confirmChannel === 'email') {
+        setConfirmPhase('code');
+      } else {
+        setConfirmPhase('waiting');
+      }
     } catch (err) {
-      alert(err.response?.data?.error || 'Ошибка записи');
+      setConfirmError(err.response?.data?.error || 'Не удалось отправить подтверждение');
     } finally {
       setBooking(false);
+      confirmRequestRef.current = false;
     }
   };
 
@@ -1164,7 +1615,7 @@ export default function ClientPage() {
   };
 
   const handleSwitchAccount = () => {
-    clearClientSession(masterId);
+    clearClientSession(...clientSessionKeys(masterId, master));
     setClientAuth(null);
     setStep('master');
     setSelectedSlot(null);
@@ -1174,27 +1625,38 @@ export default function ClientPage() {
   // LOADING STATE
   // ============================================================
   if (loading) {
+    if (loadTimedOut) {
+      return (
+        <ClientThemeRoot themeId={clientThemeId}>
+          <div
+            style={{
+              minHeight: '100dvh',
+              background: PREMIUM.accentSoft,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '24px',
+            }}
+          >
+            <PremiumCard style={{ padding: '32px', textAlign: 'center', maxWidth: 360 }}>
+              <p style={{ fontSize: '16px', fontWeight: '700', color: PREMIUM.textPrimary, marginBottom: '8px' }}>
+                Долго загружается
+              </p>
+              <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '20px' }}>
+                Проверьте интернет и попробуйте снова
+              </p>
+              <Button type="button" onClick={loadMasterData}>
+                Повторить
+              </Button>
+            </PremiumCard>
+          </div>
+        </ClientThemeRoot>
+      );
+    }
     return (
-      <div
-        style={{
-          minHeight: '100dvh',
-          background: PREMIUM.bgGradient,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            border: '4px solid rgba(217, 122, 82, 0.2)',
-            borderTopColor: PREMIUM.accent,
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }}
-        />
-      </div>
+      <ClientThemeRoot themeId={clientThemeId}>
+        <AppSplash label="Загрузка страницы" />
+      </ClientThemeRoot>
     );
   }
 
@@ -1204,99 +1666,68 @@ export default function ClientPage() {
   if (!master) {
     const is404 = loadError === 'Мастер не найден';
     return (
-      <div
-        style={{
-          minHeight: '100dvh',
-          background: PREMIUM.bgGradient,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px',
-        }}
-      >
-        <PremiumCard style={{ padding: '40px', textAlign: 'center', maxWidth: 400 }}>
-          <div
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: '50%',
-              background: PREMIUM.accentSoft,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 20px',
-              fontSize: '36px',
-            }}
-          >
-            😕
-          </div>
-          <h2 style={{ fontSize: '20px', fontWeight: '800', color: PREMIUM.textPrimary, marginBottom: '8px' }}>
-            {is404 ? 'Мастер не найден' : 'Не удалось открыть страницу'}
-          </h2>
-          <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '20px' }}>
-            {is404 ? 'Проверьте ссылку или возьмите новую в кабинете мастера → Ссылки' : (loadError || 'Попробуйте обновить страницу позже')}
-          </p>
-          {!is404 && (
-            <Button type="button" onClick={loadMasterData}>
-              Повторить
-            </Button>
-          )}
-        </PremiumCard>
-      </div>
-    );
-  }
-
-  if (!authChecked || authPending) {
-    return (
-      <div
-        style={{
-          minHeight: '100dvh',
-          background: PREMIUM.bgGradient,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
+      <ClientThemeRoot themeId={clientThemeId}>
         <div
           style={{
-            width: 48,
-            height: 48,
-            border: '4px solid rgba(217, 122, 82, 0.2)',
-            borderTopColor: PREMIUM.accent,
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
+            minHeight: '100dvh',
+            background: PREMIUM.bgGradient,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
           }}
-        />
-      </div>
+        >
+          <PremiumCard style={{ padding: '40px', textAlign: 'center', maxWidth: 400 }}>
+            <div
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: '50%',
+                background: PREMIUM.accentSoft,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 20px',
+                fontSize: '36px',
+              }}
+            >
+              😕
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: '800', color: PREMIUM.textPrimary, marginBottom: '8px' }}>
+              {is404 ? 'Мастер не найден' : 'Не удалось открыть страницу'}
+            </h2>
+            <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '20px' }}>
+              {is404 ? 'Проверьте ссылку или возьмите новую в кабинете мастера → Ссылки' : (loadError || 'Попробуйте обновить страницу позже')}
+            </p>
+            {!is404 && (
+              <Button type="button" onClick={loadMasterData}>
+                Повторить
+              </Button>
+            )}
+          </PremiumCard>
+        </div>
+      </ClientThemeRoot>
     );
   }
 
-  if (!clientAuth) {
+  if ((!authChecked || authPending) && !isClientSessionValid(clientAuth) && !inWebApp && searchParams.get('a')) {
     return (
-      <>
-        {masterSeoHead}
-        <ClientThemeRoot themeId={clientThemeId}>
-          <ClientAuthGate
-            master={master}
-            masterIdEncoded={masterId}
-            priceList={priceList}
-            reviewSummary={reviewSummary}
-            telegramBotUsername={bookingConfig?.telegramBotUsername}
-            telegramBotDeepLink={bookingConfig?.telegramBotDeepLink}
-            maxBotDeepLink={bookingConfig?.maxBotDeepLink}
-            onAuthenticated={handleAuthenticated}
-          />
-        </ClientThemeRoot>
-      </>
+      <ClientThemeRoot themeId={clientThemeId}>
+        <AppSplash label="Вход" />
+      </ClientThemeRoot>
     );
   }
+
+  const guestNeedsAuthForTab = (tabId) => {
+    if (isClientSessionValid(clientAuth) || inWebApp) return false;
+    return tabId === 'appointments';
+  };
 
   // ============================================================
   // MAIN APP
   // ============================================================
   return (
     <ClientThemeRoot themeId={clientThemeId}>
-      {masterSeoHead}
       <div
         style={{
           minHeight: '100dvh',
@@ -1328,8 +1759,8 @@ export default function ClientPage() {
           style={{
             paddingTop: 'env(safe-area-inset-top)',
             background: 'rgba(255, 255, 255, 0.75)',
-            backdropFilter: PREMIUM.blurHeavy,
-            WebkitBackdropFilter: PREMIUM.blurHeavy,
+            backdropFilter: messengerBackdropFilter(PREMIUM.blurHeavy),
+            WebkitBackdropFilter: messengerBackdropFilter(PREMIUM.blurHeavy),
             borderBottom: `1px solid ${PREMIUM.borderCard}`,
             position: 'sticky',
             top: 0,
@@ -1396,6 +1827,51 @@ export default function ClientPage() {
           </div>
         </header>
 
+        {inWebApp && clientAuth?.clientToken && !loading && (
+          <div
+            style={{
+              maxWidth: '800px',
+              margin: '0 auto',
+              width: '100%',
+              padding: '12px 16px 0',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                padding: '12px 14px',
+                borderRadius: '12px',
+                background: 'rgba(106, 90, 205, 0.08)',
+                border: '1px solid rgba(106, 90, 205, 0.2)',
+              }}
+            >
+              <p style={{ margin: 0, fontSize: '13px', lineHeight: 1.45, color: PREMIUM.textSecondary }}>
+                Если страница грузится плохо в {webAppChannelLabel}, откройте запись в Safari или Chrome.
+              </p>
+              <button
+                type="button"
+                onClick={() => openBookingInSystemBrowser(clientAuth)}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: PREMIUM.accent,
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Открыть в браузере
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Main content */}
         <main
           style={{
@@ -1426,6 +1902,24 @@ export default function ClientPage() {
 
           {/* APPOINTMENTS TAB */}
           {activeTab === 'appointments' && (
+            guestNeedsAuthForTab('appointments') ? (
+              <ClientAuthGate
+                master={master}
+                masterIdEncoded={masterId}
+                priceList={priceList}
+                reviewSummary={reviewSummary}
+                telegramBotUsername={bookingConfig?.telegramBotUsername}
+                telegramBotDeepLink={bookingConfig?.telegramBotDeepLink}
+                maxBotDeepLink={bookingConfig?.maxBotDeepLink}
+                onAuthenticated={handleAuthenticated}
+              />
+            ) : inWebApp && !clientAuth?.clientToken ? (
+              <WebAppAuthPrompt
+                authPending={authPending}
+                onRetry={retryWebAppAuth}
+                channelLabel={webAppChannelLabel}
+              />
+            ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: '800', color: PREMIUM.textPrimary, padding: '0 4px' }}>
                 Мои записи
@@ -1560,6 +2054,7 @@ export default function ClientPage() {
                 })
               )}
             </div>
+            )
           )}
 
           {/* REVIEWS TAB */}
@@ -1568,7 +2063,7 @@ export default function ClientPage() {
               <ClientReviewsPanel
                 reviews={reviews}
                 reviewSummary={reviewSummary}
-                masterId={masterId}
+                masterId={apiSalonId || masterId}
                 clientAuth={clientAuth}
                 formData={formData}
                 onSubmitted={loadMasterData}
@@ -1578,6 +2073,13 @@ export default function ClientPage() {
 
           {/* BOOKING TAB */}
           {activeTab === 'booking' && (
+            inWebApp && !clientAuth?.clientToken ? (
+              <WebAppAuthPrompt
+                authPending={authPending}
+                onRetry={retryWebAppAuth}
+                channelLabel={webAppChannelLabel}
+              />
+            ) : (
             <div id="booking-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {bookingConfig?.billingEnabled === true && bookingConfig?.onlineBookingAllowed === false ? (
                 <PremiumCard style={{ padding: '32px', textAlign: 'center' }}>
@@ -1600,9 +2102,9 @@ export default function ClientPage() {
                     Запись недоступна
                   </h2>
                   <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '24px' }}>
-                    {bookingConfig?.onlineBookingBlockReason || 'Онлайн-запись временно недоступна. Попробуйте позже.'}
+                    {bookingUnavailableContactHint(bookingUnavailableContact)}
                   </p>
-                  {master?.phone && <MasterCallButton phone={master.phone} size="md" variant="theme" />}
+                  <MasterBookingContact master={master} size="md" variant="theme" />
                 </PremiumCard>
               ) : step === 'done' ? (
                 <PremiumCard style={{ padding: '40px', textAlign: 'center' }}>
@@ -1630,9 +2132,15 @@ export default function ClientPage() {
                     {selectedSlot && formatSalonDateTime(selectedSlot, salonTimezone)}
                   </p>
                   <p style={{ fontSize: '12px', color: PREMIUM.textMuted, marginBottom: '32px' }}>
-                    Напоминание в <MessengerLabel channel={clientAuth.channel} size="xs" />
+                    {(confirmedChannel === 'email')
+                      ? 'Детали записи отправлены на ваш email.'
+                      : confirmedChannel
+                        ? <>Напоминания придут в <MessengerLabel channel={confirmedChannel} size="xs" /> за 24 часа и за 3 часа до визита.</>
+                        : clientAuth?.channel
+                          ? <>Напоминание в <MessengerLabel channel={clientAuth.channel} size="xs" /></>
+                          : 'Ждём вас!'}
                   </p>
-                  <PremiumCtaBtn onClick={() => { setActiveTab('appointments'); setRescheduleId(null); setStep('master'); setSelectedSlot(null); setSelectedService(null); loadAppointments(); }}>
+                  <PremiumCtaBtn onClick={() => { setActiveTab('appointments'); setRescheduleId(null); setStep('master'); setSelectedSlot(null); setSelectedService(null); resetConfirmFlow(); loadAppointments(); }}>
                     <ListChecks size={20} />
                     Мои записи
                   </PremiumCtaBtn>
@@ -1868,13 +2376,15 @@ export default function ClientPage() {
                               Дата
                             </p>
                             <div className="premium-calendar-wrap" style={{ borderRadius: '20px', overflow: 'hidden' }}>
-                              <Calendar
-                                onChange={(date) => { setSelectedDate(date); setSelectedSlot(null); }}
-                                value={selectedDate}
-                                minDate={new Date()}
-                                locale="ru-RU"
-                                className="premium-calendar"
-                              />
+                              <Suspense fallback={<AppSplash fullScreen={false} label="Загрузка календаря" />}>
+                                <BookingDateCalendar
+                                  onChange={(date) => { setSelectedDate(date); setSelectedSlot(null); }}
+                                  value={selectedDate}
+                                  minDate={new Date()}
+                                  locale="ru-RU"
+                                  className="premium-calendar"
+                                />
+                              </Suspense>
                             </div>
                           </div>
                           <div>
@@ -1947,7 +2457,10 @@ export default function ClientPage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                           <button
                             type="button"
-                            onClick={() => setStep('datetime')}
+                            onClick={() => {
+                              resetConfirmFlow();
+                              setStep('datetime');
+                            }}
                             style={{
                               width: 36,
                               height: 36,
@@ -1996,30 +2509,166 @@ export default function ClientPage() {
                           </div>
                         </div>
 
-                        <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr 1fr' }}>
-                          <Input
-                            label="Ваше имя"
-                            required
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            placeholder="Например, Анна"
-                            error={formData.name ? getClientNameError(formData.name) : null}
-                          />
-                          <PhoneRuInput
-                            label="Телефон"
-                            required
-                            value={formData.phone}
-                            onChange={(phone) => setFormData({ ...formData, phone })}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '20px' }}>
+                        <BookingRequiredSection
+                          title="Ваши контакты"
+                          subtitle="Укажите имя и телефон — без них запись не оформится"
+                          incomplete={!canSubmitBooking(formData)}
+                        >
+                          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                            <Input
+                              label="Ваше имя"
+                              required
+                              value={formData.name}
+                              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                              placeholder="Например, Анна"
+                              error={formData.name ? getClientNameError(formData.name) : null}
+                            />
+                            <PhoneRuInput
+                              label="Телефон"
+                              required
+                              value={formData.phone}
+                              onChange={(phone) => setFormData({ ...formData, phone })}
+                            />
+                          </div>
+                        </BookingRequiredSection>
+
+                        <div style={{ fontSize: '13px', color: PREMIUM.textSecondary, lineHeight: 1.45 }}>
+                          <PersonalDataConsentCheckbox
+                            checked={pdConsent}
+                            onChange={setPdConsent}
+                            variant="client"
+                            masterTitle={title}
+                            id="client-pd-consent"
+                            labelClassName="flex gap-3 cursor-pointer"
+                            checkboxClassName="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
+                            linkStyle={{ color: PREMIUM.accent, textDecoration: 'underline', textUnderlineOffset: '2px' }}
                           />
                         </div>
-                        <div style={{ marginTop: '16px' }}>
-                          <PremiumCtaBtn
-                            type="submit"
-                            disabled={!canSubmitBooking(formData)}
-                            loading={booking}
+
+                        {!rescheduleId && confirmPhase === 'choose' && (
+                          <BookingRequiredSection
+                            title="Способ подтверждения"
+                            subtitle="Выберите, как подтвердить запись: Telegram, MAX или email с кодом"
+                            incomplete={!confirmChannel}
                           >
-                            {rescheduleId ? 'Перенести запись' : 'Записаться'}
-                          </PremiumCtaBtn>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              {CONFIRM_CHANNELS.map((ch) => (
+                                <ConfirmChannelCard
+                                  key={ch.id}
+                                  channel={ch.id}
+                                  selected={confirmChannel}
+                                  onSelect={setConfirmChannel}
+                                  emphasize={!confirmChannel}
+                                />
+                              ))}
+                            </div>
+                            {confirmChannel === 'email' && (
+                              <div style={{ marginTop: '14px' }}>
+                                <Input
+                                  label="Email для кода"
+                                  type="email"
+                                  required
+                                  value={confirmEmail}
+                                  onChange={(e) => setConfirmEmail(e.target.value)}
+                                  placeholder="anna@example.com"
+                                />
+                              </div>
+                            )}
+                          </BookingRequiredSection>
+                        )}
+                        </div>
+
+                        {!rescheduleId && confirmPhase === 'waiting' && (
+                          <PremiumCard style={{ marginTop: '20px', padding: '20px', background: PREMIUM.accentSoft, border: `1px solid ${PREMIUM.borderAccent}` }}>
+                            <p style={{ fontSize: '15px', fontWeight: '700', color: PREMIUM.textPrimary, marginBottom: '8px' }}>
+                              Подтвердите в {confirmChannel === 'telegram' ? 'Telegram' : 'MAX'}
+                            </p>
+                            <p style={{ fontSize: '13px', color: PREMIUM.textSecondary, marginBottom: '16px', lineHeight: 1.5 }}>
+                              Откройте бота — придёт сообщение с услугой, временем и стоимостью.
+                              Нажмите «Подтвердить запись». Напоминания за 24 ч и 3 ч придут в этот бот.
+                            </p>
+                            {botDeepLink && (
+                              <PremiumCtaBtn
+                                type="button"
+                                style={{ width: '100%', marginBottom: '12px' }}
+                                onClick={() => window.open(botDeepLink, '_blank', 'noopener,noreferrer')}
+                              >
+                                Открыть {confirmChannel === 'telegram' ? 'Telegram' : 'MAX'}
+                              </PremiumCtaBtn>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                              <div
+                                style={{
+                                  width: 18,
+                                  height: 18,
+                                  border: '2px solid rgba(106, 90, 205, 0.25)',
+                                  borderTopColor: PREMIUM.accent,
+                                  borderRadius: '50%',
+                                  animation: 'spin 0.8s linear infinite',
+                                }}
+                              />
+                              <span style={{ fontSize: '13px', color: PREMIUM.textSecondary }}>Ждём подтверждения…</span>
+                            </div>
+                          </PremiumCard>
+                        )}
+
+                        {!rescheduleId && confirmPhase === 'code' && (
+                          <div style={{ marginTop: '20px' }}>
+                            <p style={{ fontSize: '14px', color: PREMIUM.textSecondary, marginBottom: '12px', lineHeight: 1.45 }}>
+                              Код отправлен на <b>{confirmEmail}</b>. Введите его ниже.
+                            </p>
+                            <Input
+                              label="Код из письма"
+                              inputMode="numeric"
+                              autoComplete="one-time-code"
+                              value={emailCode}
+                              onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              placeholder="482913"
+                            />
+                          </div>
+                        )}
+
+                        {confirmError && (
+                          <p style={{ marginTop: '12px', fontSize: '13px', color: '#c62828' }}>{confirmError}</p>
+                        )}
+
+                        <div style={{ marginTop: '16px' }}>
+                          {rescheduleId ? (
+                            <PremiumCtaBtn
+                              type="submit"
+                              disabled={!canSubmitBooking(formData) || !pdConsent}
+                              loading={booking}
+                            >
+                              Перенести запись
+                            </PremiumCtaBtn>
+                          ) : confirmPhase === 'code' ? (
+                            <PremiumCtaBtn
+                              type="button"
+                              disabled={emailCode.length !== 6}
+                              loading={booking}
+                              onClick={handleConfirmEmailCode}
+                            >
+                              Подтвердить код
+                            </PremiumCtaBtn>
+                          ) : confirmPhase === 'waiting' ? (
+                            <PremiumSecondaryBtn
+                              type="button"
+                              onClick={() => {
+                                resetConfirmFlow();
+                              }}
+                            >
+                              Изменить способ
+                            </PremiumSecondaryBtn>
+                          ) : (
+                            <PremiumCtaBtn
+                              type="submit"
+                              disabled={!canSubmitBooking(formData) || !pdConsent || !confirmChannel || (confirmChannel === 'email' && !confirmEmail.trim())}
+                              loading={booking}
+                            >
+                              {confirmChannel === 'email' ? 'Получить код на почту' : 'Получить подтверждение в боте'}
+                            </PremiumCtaBtn>
+                          )}
                         </div>
                       </PremiumCard>
                     </form>
@@ -2035,11 +2684,12 @@ export default function ClientPage() {
                 </>
               )}
             </div>
+            )
           )}
         </main>
 
         {/* Mobile bottom nav */}
-        <PremiumTabBar activeTab={activeTab} onTabChange={setActiveTab} />
+        <PremiumTabBar activeTab={activeTab} onTabChange={handleTabChange} />
 
         
 

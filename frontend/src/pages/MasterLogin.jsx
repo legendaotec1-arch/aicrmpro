@@ -98,7 +98,16 @@ export default function MasterLogin() {
   return (
     <AuthLayout title="С возвращением" subtitle="Вход по коду на email">
       {error && (
-        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+          {/не зарегистрирован/i.test(error) ? (
+            <p className="mt-2">
+              <Link to="/register" className="font-semibold text-primary hover:underline">
+                Перейти к регистрации →
+              </Link>
+            </p>
+          ) : null}
+        </div>
       )}
       <form onSubmit={sendCode} className="space-y-4">
         <Input

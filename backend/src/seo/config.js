@@ -33,6 +33,7 @@ const STATIC_ROUTES = [
   { path: '/faq', changefreq: 'monthly', priority: 0.6 },
   { path: '/legal/offer', changefreq: 'yearly', priority: 0.3 },
   { path: '/legal/privacy', changefreq: 'yearly', priority: 0.3 },
+  { path: '/legal/personal-data-consent', changefreq: 'yearly', priority: 0.3 },
   { path: '/legal/payment', changefreq: 'yearly', priority: 0.3 },
 ];
 

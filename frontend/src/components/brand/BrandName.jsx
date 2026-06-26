@@ -25,7 +25,7 @@ export default function BrandName({
 }
 
 /** Вставляет жирный Woner.ru в произвольный текст */
-export function RichBrandText({ text, brandClassName = '' }) {
+export function RichBrandText({ text, brandClassName = '', brandTldClassName }) {
   if (!text || !text.includes(BRAND_NAME)) return text;
   const parts = text.split(BRAND_NAME);
   return (
@@ -33,7 +33,9 @@ export function RichBrandText({ text, brandClassName = '' }) {
       {parts.map((part, i) => (
         <Fragment key={i}>
           {part}
-          {i < parts.length - 1 && <BrandName className={brandClassName} />}
+          {i < parts.length - 1 && (
+            <BrandName className={brandClassName} tldClassName={brandTldClassName} />
+          )}
         </Fragment>
       ))}
     </>

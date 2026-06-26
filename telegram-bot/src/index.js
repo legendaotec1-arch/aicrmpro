@@ -4,12 +4,12 @@ const cors = require('cors');
 const axios = require('axios');
 const { Telegraf, Markup } = require('telegraf');
 const { requireInternalSecret, internalAuthHeaders } = require('./internalAuth');
-const { appendDeepLinkAuthParams } = require('./clientDeepLink');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+const { appendDeepLinkAuthParams } = require('./clientDeepLink');
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -34,18 +34,61 @@ function encodeMasterId(masterId) {
   return Buffer.from(String(masterId)).toString('base64');
 }
 
-function buildBookingUrl(masterIdEncoded, userId, extra = {}) {
-  const params = new URLSearchParams();
-  if (userId) {
-    params.set('ch', 'telegram');
-    params.set('uid', String(userId));
-    appendDeepLinkAuthParams(params, { channel: 'telegram', userId: String(userId), masterIdEncoded });
+async function fetchMasterCard(masterIdEncoded) {
+  const res = await axios.get(`${API_BASE}/api/master/${masterIdEncoded}`);
+  const master = res.data?.master || {};
+  const title = master.display_title
+    || (master.salon_name?.trim() ? master.salon_name.trim() : [master.name, master.last_name].filter(Boolean).join(' '))
+    || 'Мастер';
+  return {
+    title,
+    description: master.description || '',
+    photoUrl: absoluteUrl(master.logo_url),
+    pathSegment: master.public_slug || masterIdEncoded,
+    encoded: masterIdEncoded
+  };
+}
+
+async function resolveBookingPathSegment(masterRef) {
+  if (!masterRef) return null;
+  if (/^[a-z0-9]+(-[a-z0-9]+)+$/i.test(String(masterRef))) return String(masterRef);
+  try {
+    const card = await fetchMasterCard(masterRef);
+    return card.pathSegment || masterRef;
+  } catch {
+    return masterRef;
   }
-  Object.entries(extra).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
-  });
-  const query = params.toString();
-  return `${PUBLIC_URL}/m/${masterIdEncoded}${query ? `?${query}` : ''}`;
+}
+
+/** Короткая ссылка; для переноса — длинный deeplink */
+async function buildBookingLinks(pathSegment, userId, signMasterIdEncoded, extra = {}) {
+  const encoded = signMasterIdEncoded || pathSegment;
+  if (extra.reschedule || (extra.tab && extra.tab !== 'booking')) {
+    const params = new URLSearchParams({ ch: 'telegram' });
+    if (userId) params.set('uid', String(userId));
+    Object.entries(extra).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    if (userId) {
+      appendDeepLinkAuthParams(params, { channel: 'telegram', userId: String(userId), masterIdEncoded: encoded });
+    }
+    const url = `${PUBLIC_URL}/m/${pathSegment}?${params.toString()}`;
+    return { buttonUrl: url, browserUrl: url };
+  }
+  const res = await axios.post(
+    `${API_BASE}/api/client/short-link`,
+    { masterId: encoded, channel: 'telegram', userId: String(userId) },
+    { timeout: 15000, headers: internalAuthHeaders() }
+  );
+  return {
+    buttonUrl: res.data.url || res.data.browserUrl,
+    browserUrl: res.data.browserUrl || res.data.url,
+  };
+}
+
+async function buildBookingUrl(pathSegment, userId, signMasterIdEncoded, extra = {}) {
+  const links = await buildBookingLinks(pathSegment, userId, signMasterIdEncoded, extra);
+  return links.buttonUrl;
 }
 
 function absoluteUrl(path) {
@@ -61,43 +104,30 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;');
 }
 
-async function fetchMasterCard(masterIdEncoded) {
-  const res = await axios.get(`${API_BASE}/api/master/${masterIdEncoded}`);
-  const master = res.data?.master || {};
-  return {
-    title: master.display_title
-      || (master.salon_name?.trim() ? master.salon_name.trim() : [master.name, master.last_name].filter(Boolean).join(' '))
-      || 'Мастер',
-    description: master.description || '',
-    photoUrl: absoluteUrl(master.logo_url)
-  };
-}
-
-function webAppButton(label, url) {
-  // WebApp-кнопка — открывает Mini App внутри Telegram
-  return Markup.button.webApp(label, url);
+function bookingButton(label, url) {
+  return Markup.button.url(label, url);
 }
 
 function bookingKeyboard(url, encoded) {
-  const rows = [[webAppButton('Записаться', url)]];
+  const rows = [[bookingButton('Записаться', url)]];
   if (encoded) rows.push([Markup.button.callback('Мои записи', `my_bookings:${encoded}`)]);
   return Markup.inlineKeyboard(rows);
 }
 
 function bookingOnlyKeyboard(url) {
-  return Markup.inlineKeyboard([[webAppButton('Записаться', url)]]);
+  return Markup.inlineKeyboard([[bookingButton('Записаться', url)]]);
 }
 
 function appointmentKeyboard(apt, userId, fallbackMasterIdEncoded) {
   const encoded = fallbackMasterIdEncoded || encodeMasterId(apt.master_id);
-  const rescheduleUrl = buildBookingUrl(encoded, userId, {
+  const segment = apt.master_slug || encoded;
+  return buildBookingUrl(segment, userId, encoded, {
     tab: 'booking',
     reschedule: apt.id
-  });
-  return Markup.inlineKeyboard([
-    [webAppButton('Перенести запись', rescheduleUrl)],
+  }).then((rescheduleUrl) => Markup.inlineKeyboard([
+    [bookingButton('Перенести запись', rescheduleUrl)],
     [Markup.button.callback('Отменить запись', `cancel_apt:${apt.id}`)]
-  ]);
+  ]));
 }
 
 function truncateText(text, max = 600) {
@@ -112,7 +142,7 @@ function formatMasterCard(card) {
   lines.push(
     '',
     '👇 <b>Что можно сделать:</b>',
-    '📅 Для записи нажмите <b>«Записаться»</b>.',
+    '📅 Нажмите «Записаться», затем на экране — «Открыть запись» в Safari.',
     '🗓 Посмотреть ваши записи — <b>«Мои записи»</b>.'
   );
   return lines.join('\n');
@@ -129,23 +159,26 @@ async function clearOldKeyboard(ctx) {
 
 async function replyMasterCard(ctx, encoded) {
   const userId = ctx.from.id.toString();
-  const url = buildBookingUrl(encoded, userId);
   lastMasterByUser.set(userId, encoded);
 
   let card;
+  let pathSegment = await resolveBookingPathSegment(encoded);
   try {
     card = await fetchMasterCard(encoded);
+    pathSegment = card.pathSegment || pathSegment;
   } catch (err) {
     console.error('Telegram fetch master card error:', err.message);
+    const links = await buildBookingLinks(pathSegment || encoded, userId, encoded);
     await ctx.reply(
-      'Запись к мастеру\n\nДля записи нажмите кнопку «Записаться».',
-      bookingKeyboard(url, encoded)
+      `Запись к мастеру\n\nДля записи нажмите «Записаться».\n\n🔗 ${links.browserUrl}`,
+      bookingKeyboard(links.buttonUrl, encoded)
     );
     return;
   }
 
-  const message = formatMasterCard(card);
-  const keyboard = bookingKeyboard(url, encoded);
+  const links = await buildBookingLinks(pathSegment, userId, card.encoded || encoded);
+  const message = `${formatMasterCard(card)}\n\n🔗 <a href="${escapeHtml(links.browserUrl)}">Ссылка для браузера</a>\n<code>${escapeHtml(links.browserUrl)}</code>`;
+  const keyboard = bookingKeyboard(links.buttonUrl, encoded);
 
   if (card.photoUrl) {
     try {
@@ -170,8 +203,53 @@ function parseStartPayload(text) {
   const parts = (text || '').trim().split(/\s+/);
   if (parts.length < 2) return null;
   const payload = parts[1];
+  if (payload.startsWith('confirm_')) return { type: 'confirm', token: payload.replace(/^confirm_/, '') };
   if (!payload.startsWith('ref_')) return null;
-  return payload.replace('ref_', '');
+  return { type: 'ref', encoded: payload.replace('ref_', '') };
+}
+
+async function handleBookingConfirmOpen(ctx, token) {
+  const userId = ctx.from.id.toString();
+  syncClientAvatar(ctx).catch(() => {});
+  try {
+    await axios.post(
+      `${API_BASE}/api/client/booking/messenger-open`,
+      { token, channel: 'telegram', userId },
+      { timeout: 20000, headers: internalAuthHeaders() }
+    );
+  } catch (err) {
+    const msg = err.response?.data?.error || 'Не удалось загрузить заявку';
+    if (err.response?.status === 410) {
+      await ctx.reply('Время подтверждения истекло. Вернитесь на сайт и запишитесь снова.');
+      return;
+    }
+    await ctx.reply(msg);
+  }
+}
+
+async function handleBookingConfirmClick(ctx, token) {
+  const userId = ctx.from.id.toString();
+  try {
+    const res = await axios.post(
+      `${API_BASE}/api/client/booking/messenger-confirm`,
+      { token, channel: 'telegram', userId },
+      { timeout: 20000, headers: internalAuthHeaders() }
+    );
+    await ctx.answerCbQuery('Запись подтверждена!');
+    await ctx.reply('✅ Запись подтверждена!\n\nНапоминания придут сюда за 24 часа и за 3 часа до визита.');
+    if (res.data?.appointmentId) {
+      await ctx.reply(`Номер записи: ${res.data.appointmentId.slice(0, 8)}…`);
+    }
+  } catch (err) {
+    const status = err.response?.status;
+    const msg = err.response?.data?.error || 'Не удалось подтвердить';
+    if (status === 409) {
+      await ctx.answerCbQuery('Время уже занято', { show_alert: true });
+      await ctx.reply('❌ Это время уже занято. Вернитесь на сайт и выберите другое время.');
+      return;
+    }
+    await ctx.answerCbQuery(msg, { show_alert: true });
+  }
 }
 
 async function syncClientAvatar(ctx) {
@@ -219,7 +297,11 @@ async function fetchAppointments(userId) {
 
 async function replyMyBookings(ctx, masterIdEncoded = null) {
   const userId = ctx.from.id.toString();
-  const bookingUrl = masterIdEncoded ? buildBookingUrl(masterIdEncoded, userId) : null;
+  let bookingUrl = null;
+  if (masterIdEncoded) {
+    const segment = await resolveBookingPathSegment(masterIdEncoded);
+    bookingUrl = await buildBookingUrl(segment || masterIdEncoded, userId, masterIdEncoded);
+  }
   try {
     const appointments = await fetchAppointments(userId);
     if (!appointments.length) {
@@ -238,7 +320,7 @@ async function replyMyBookings(ctx, masterIdEncoded = null) {
         minute: '2-digit'
       });
       const text = `🧾 ${apt.service_name}\n🕒 ${date}\n📍 ${apt.address || '—'}`;
-      await ctx.reply(text, appointmentKeyboard(apt, userId, masterIdEncoded));
+      await ctx.reply(text, await appointmentKeyboard(apt, userId, masterIdEncoded));
     }
   } catch (err) {
     console.error(err);
@@ -248,7 +330,14 @@ async function replyMyBookings(ctx, masterIdEncoded = null) {
 
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
-  const encoded = parseStartPayload(ctx.message.text);
+  const parsed = parseStartPayload(ctx.message.text);
+
+  if (parsed?.type === 'confirm' && parsed.token) {
+    await handleBookingConfirmOpen(ctx, parsed.token);
+    return;
+  }
+
+  const encoded = parsed?.type === 'ref' ? parsed.encoded : null;
 
   syncClientAvatar(ctx).catch(() => {});
 
@@ -272,6 +361,10 @@ bot.action('my_bookings', async (ctx) => {
 bot.action(/^my_bookings:(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   await replyMyBookings(ctx, ctx.match[1]);
+});
+
+bot.action(/^confirm_booking:(.+)$/, async (ctx) => {
+  await handleBookingConfirmClick(ctx, ctx.match[1]);
 });
 
 bot.action(/^cancel_apt:(.+)$/, async (ctx) => {
@@ -327,10 +420,41 @@ bot.hears(/^\/cancel_(.+)$/, async (ctx) => {
   }
 });
 
-bot.launch().then(() => console.log(`Telegram bot (polling) запущен, API_BASE=${API_BASE}`));
+async function configureBotMenu() {
+  try {
+    await bot.telegram.setChatMenuButton({ menu_button: { type: 'commands' } });
+    console.log('Telegram menu: commands (без WebApp about:blank)');
+  } catch (err) {
+    console.error('setChatMenuButton:', err.message);
+  }
+}
+
+bot.launch().then(async () => {
+  await configureBotMenu();
+  console.log(`Telegram bot (polling) запущен, API_BASE=${API_BASE}`);
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+app.post('/send-booking-confirm', requireInternalSecret, async (req, res) => {
+  try {
+    const { telegramUserId, message, confirmToken } = req.body;
+    if (!telegramUserId || !message || !confirmToken) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    await bot.telegram.sendMessage(telegramUserId, message, {
+      parse_mode: 'HTML',
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback('Подтвердить запись', `confirm_booking:${confirmToken}`)]
+      ]).reply_markup
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Telegram send-booking-confirm error:', error.message);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+});
 
 app.post('/notify', requireInternalSecret, async (req, res) => {
   try {
@@ -339,15 +463,18 @@ app.post('/notify', requireInternalSecret, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     const options = replyUrl
-      ? Markup.inlineKeyboard([[webAppButton(replyText || 'Ответить мастеру', replyUrl)]])
+      ? Markup.inlineKeyboard([[bookingButton(replyText || 'Записаться', replyUrl)]])
       : undefined;
+    const text = replyUrl
+      ? `${message || ''}\n\n🔗 ${replyUrl}`.trim()
+      : message;
     if (imageUrl) {
       await bot.telegram.sendPhoto(telegramUserId, imageUrl, {
-        caption: message || undefined,
+        caption: text || undefined,
         ...(options ? { reply_markup: options.reply_markup } : {}),
       });
     } else {
-      await bot.telegram.sendMessage(telegramUserId, message, options);
+      await bot.telegram.sendMessage(telegramUserId, text, options);
     }
     res.json({ success: true });
   } catch (error) {
