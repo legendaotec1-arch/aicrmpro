@@ -37,6 +37,25 @@ function mapRow(row) {
   };
 }
 
+const LEGAL_PAGES = {
+  '/legal/offer': {
+    title: 'Публичная оферта Woner.ru',
+    description: 'Условия использования сервиса онлайн-записи Woner.ru. Правила для мастеров и клиентов.',
+  },
+  '/legal/privacy': {
+    title: 'Политика обработки персональных данных Woner.ru',
+    description: 'Политика обработки персональных данных в сервисе онлайн-записи Woner.ru.',
+  },
+  '/legal/personal-data-consent': {
+    title: 'Согласие на обработку персональных данных Woner.ru',
+    description: 'Отдельное согласие на обработку персональных данных в сервисе Woner.ru (152-ФЗ).',
+  },
+  '/legal/payment': {
+    title: 'Правила оплаты и возврата Woner.ru',
+    description: 'Информация о тарифах, способах оплаты и возврате средств в сервисе Woner.ru.',
+  },
+};
+
 async function resolveSeoForPath(pathname) {
   const clean = pathname.replace(/\/$/, '') || '/';
   if (clean === '/') return null;
@@ -107,6 +126,17 @@ async function resolveSeoForPath(pathname) {
       description: isPress
         ? 'Логотипы, описание сервиса, RSS для Дзена и материалы для VC.ru, Habr и каталогов.'
         : 'Готовые ссылки и UTM для блогов партнёров, школ маникюра и салонов.',
+      canonical: `${SITE_URL}${clean}`,
+      robots: 'index, follow',
+      jsonLdBlocks: [],
+    };
+  }
+
+  const legalMeta = LEGAL_PAGES[clean];
+  if (legalMeta) {
+    return {
+      title: legalMeta.title,
+      description: legalMeta.description,
       canonical: `${SITE_URL}${clean}`,
       robots: 'index, follow',
       jsonLdBlocks: [],

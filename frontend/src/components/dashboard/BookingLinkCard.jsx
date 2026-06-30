@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Copy, Download, ExternalLink, Check, Link2 } from 'lucide-react';
+import { Copy, Download, ExternalLink, Check, Share2 } from 'lucide-react';
 import Button from '../ui/Button';
 import { copyToClipboard } from '../../lib/clipboard';
 import { downloadBookingQrPng, qrFilenameFromSalon, qrPreviewDataUrl } from '../../lib/qrCode';
 
-const QR_SIZE = 112;
-const glassControl =
-  'rounded-xl border border-slate-200/90 bg-white/80 shadow-sm backdrop-blur-md';
-const glassButton =
-  '!border-slate-200/90 !bg-white/85 backdrop-blur-sm shadow-sm hover:!border-primary/35 hover:!bg-white';
+const QR_SIZE = 96;
 
 export default function BookingLinkCard({
   url,
@@ -49,7 +45,7 @@ export default function BookingLinkCard({
     try {
       await copyToClipboard(url);
       setCopied(true);
-      onCopied?.('Скопировано');
+      onCopied?.('Ссылка скопирована');
       setTimeout(() => setCopied(false), 2000);
     } catch {
       onCopied?.('Не удалось скопировать', 'error');
@@ -72,88 +68,50 @@ export default function BookingLinkCard({
   if (!url) return null;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#F0F0F0] via-white to-violet-50/90" />
-      <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-violet-300/45 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-blue-200/35 blur-3xl" />
-      <div className="pointer-events-none absolute right-1/3 top-1/2 h-28 w-28 rounded-full bg-primary/15 blur-2xl" />
+    <section className="overflow-hidden rounded-[1.35rem] bg-white shadow-[0_12px_40px_rgba(106,90,205,0.12)] ring-1 ring-violet-100">
+      <div className="border-b border-violet-50 bg-gradient-to-r from-violet-50/80 to-white px-4 py-3 sm:px-5">
+        <div className="flex items-center gap-2">
+          <Share2 className="h-4 w-4 text-violet-600" />
+          <h2 className="text-sm font-bold text-admin-text">Ссылка для клиентов</h2>
+        </div>
+        <p className="mt-1 text-xs text-admin-textSecondary">Отправьте в соцсети, мессенджеры или на визитку</p>
+      </div>
 
-      <div className="relative card-glass !rounded-2xl !p-0 sm:!rounded-3xl">
-        <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:gap-5 md:p-5">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-sm ring-1 ring-white/60">
-                <Link2 className="h-4 w-4" strokeWidth={2} />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-admin-text">Ваша ссылка</h3>
-                <p className="text-xs text-admin-textSecondary">Для соцсетей, визитки и мессенджеров</p>
-              </div>
-            </div>
-
-            <div className="mt-3 flex min-w-0 items-stretch gap-2">
-              <div className={`${glassControl} flex min-w-0 flex-1 items-center gap-1 pl-3 pr-1 py-1.5`}>
-                <p
-                  className="min-w-0 flex-1 truncate font-mono text-xs text-admin-text sm:text-sm"
-                  title={url}
-                >
-                  {url}
-                </p>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-admin-textMuted transition hover:border-slate-200/90 hover:bg-white hover:text-primary sm:h-8 sm:w-8"
-                  aria-label={copied ? 'Скопировано' : 'Копировать ссылку'}
-                >
-                  {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
-                </button>
-              </div>
-              <a href={url} target="_blank" rel="noreferrer" className="shrink-0">
-                <Button size="sm" variant="secondary" className={`h-full px-3 ${glassButton}`}>
-                  <ExternalLink className="h-4 w-4" />
-                  <span className="hidden sm:inline">Открыть</span>
-                </Button>
-              </a>
-            </div>
+      <div className="grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-5 sm:p-5">
+        <div className="min-w-0 space-y-3">
+          <div className="rounded-xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200/80">
+            <p className="break-all font-mono text-[13px] leading-relaxed text-admin-text">{url}</p>
           </div>
-
-          <div className="flex items-center justify-between gap-3 border-t border-slate-200/70 pt-3 md:w-auto md:shrink-0 md:flex-col md:items-center md:gap-2 md:border-l md:border-t-0 md:pl-5 md:pt-0">
-            <div className={`${glassControl} p-1.5`}>
-              {qrLoading ? (
-                <div
-                  className="animate-pulse rounded-lg bg-white/50"
-                  style={{ width: QR_SIZE, height: QR_SIZE }}
-                />
-              ) : qrSrc ? (
-                <img
-                  src={qrSrc}
-                  alt="QR-код для записи"
-                  width={QR_SIZE}
-                  height={QR_SIZE}
-                  className="rounded-lg"
-                  style={{ width: QR_SIZE, height: QR_SIZE }}
-                />
-              ) : (
-                <div
-                  className="flex items-center justify-center rounded-lg bg-white/50 text-[10px] text-admin-textMuted"
-                  style={{ width: QR_SIZE, height: QR_SIZE }}
-                >
-                  QR недоступен
-                </div>
-              )}
-            </div>
-            <Button
-              size="sm"
-              onClick={handleDownloadQr}
-              loading={downloading}
-              className="shadow-sm"
-            >
-              <Download className="h-4 w-4" />
-              Скачать
+          <div className="grid grid-cols-2 gap-2">
+            <Button onClick={handleCopy} className="col-span-2 sm:col-span-1">
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? 'Скопировано' : 'Копировать'}
             </Button>
+            <a href={url} target="_blank" rel="noreferrer">
+              <Button variant="secondary" className="w-full">
+                <ExternalLink className="h-4 w-4" />
+                Открыть
+              </Button>
+            </a>
           </div>
         </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-2xl bg-violet-50/60 p-3 ring-1 ring-violet-100 sm:flex-col sm:justify-center sm:p-4">
+          <div className="rounded-xl bg-white p-2 shadow-sm ring-1 ring-violet-100">
+            {qrLoading ? (
+              <div className="h-24 w-24 animate-pulse rounded-lg bg-slate-100" />
+            ) : qrSrc ? (
+              <img src={qrSrc} alt="QR-код" width={QR_SIZE} height={QR_SIZE} className="rounded-lg" />
+            ) : (
+              <div className="flex h-24 w-24 items-center justify-center text-[10px] text-admin-textMuted">Нет QR</div>
+            )}
+          </div>
+          <Button size="sm" variant="secondary" onClick={handleDownloadQr} loading={downloading} className="shrink-0">
+            <Download className="h-4 w-4" />
+            QR PNG
+          </Button>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

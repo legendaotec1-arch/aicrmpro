@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Download, MessageCircle, Phone, Plus, Search, ShieldOff, Trash2, Users } from 'lucide-react';
-import Card from '../ui/Card';
+import {
+  ChevronRight,
+  Download,
+  Plus,
+  Search,
+  ShieldOff,
+  Users
+} from 'lucide-react';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import ClientAvatar from './ClientAvatar';
+import { ClientListActionBar } from './ClientActionBar';
 import BlacklistSection from './BlacklistSection';
 import { formatDate, formatPrice } from '../../lib/format';
 import { formatRuPhoneDisplay, toTelHref } from '../../lib/phoneRu';
@@ -22,20 +29,7 @@ function matchesSearch(client, query) {
   return name.includes(q) || (digits.length >= 3 && phone.includes(digits));
 }
 
-function StatPill({ children, tone = 'neutral' }) {
-  const tones = {
-    neutral: 'bg-slate-100 text-slate-600',
-    accent: 'bg-admin-accentSoft text-admin-accent',
-    muted: 'bg-admin-bg text-admin-textMuted'
-  };
-  return (
-    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${tones[tone]}`}>
-      {children}
-    </span>
-  );
-}
-
-function ClientRow({ client, onOpen, onMessage, onDelete }) {
+function ClientCard({ client, onOpen, onMessage, onDelete }) {
   const name = clientName(client);
   const visits = Number(client.visit_count) || 0;
   const spent = Number(client.total_spent) || 0;
@@ -47,71 +41,57 @@ function ClientRow({ client, onOpen, onMessage, onDelete }) {
   const telHref = client.tel_href || (rawPhone ? toTelHref(rawPhone) : null);
 
   return (
-    <li className="group">
-      <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+    <li>
+      <article className="overflow-hidden rounded-[1.2rem] bg-white shadow-[0_6px_24px_rgba(15,23,42,0.05)] ring-1 ring-slate-200/80 transition active:scale-[0.995]">
         <button
           type="button"
           onClick={() => onOpen?.(client)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left sm:gap-3"
+          className="flex w-full items-start gap-3 p-3.5 text-left sm:p-4"
         >
-          <ClientAvatar client={client} size="xs" className="sm:!h-10 sm:!w-10 sm:!text-sm" />
+          <ClientAvatar client={client} size="sm" />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <p className="truncate text-sm font-semibold text-admin-text">{name}</p>
-              {hasTelegram && <Badge tone="telegram" className="!px-1.5 !py-0 !text-[10px]" />}
-              {hasMax && <Badge tone="max" className="!px-1.5 !py-0 !text-[10px]" />}
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <h3 className="truncate text-[15px] font-bold text-admin-text">{name}</h3>
+                  {hasTelegram ? <Badge tone="telegram" className="!px-1.5 !py-0 !text-[10px]" /> : null}
+                  {hasMax ? <Badge tone="max" className="!px-1.5 !py-0 !text-[10px]" /> : null}
+                </div>
+                <p className="mt-1 text-sm tabular-nums text-admin-textSecondary">
+                  {phoneDisplay && phoneDisplay !== '+7' ? phoneDisplay : 'Без телефона'}
+                </p>
+              </div>
+              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-admin-textMuted" />
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              {phoneDisplay && phoneDisplay !== '+7' ? (
-                <span className="text-xs tabular-nums text-admin-textSecondary">{phoneDisplay}</span>
-              ) : (
-                <span className="text-xs text-admin-textMuted">Без телефона</span>
-              )}
-              {visits > 0 && <StatPill tone="neutral">{visits} виз.</StatPill>}
-              {spent > 0 && <StatPill tone="accent">{formatPrice(spent)}</StatPill>}
-              {client.last_visit && (
-                <span className="hidden sm:inline-flex">
-                  <StatPill tone="muted">{formatDate(client.last_visit, { year: undefined, month: 'short' })}</StatPill>
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {visits > 0 ? (
+                <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                  {visits} виз.
                 </span>
-              )}
+              ) : null}
+              {spent > 0 ? (
+                <span className="rounded-lg bg-violet-100 px-2 py-1 text-[11px] font-semibold text-violet-700">
+                  {formatPrice(spent)}
+                </span>
+              ) : null}
+              {client.last_visit ? (
+                <span className="rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                  {formatDate(client.last_visit, { year: undefined, month: 'short', day: 'numeric' })}
+                </span>
+              ) : null}
             </div>
           </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-admin-textMuted/70" />
         </button>
 
-        <div className="flex shrink-0 items-center gap-0.5">
-          {telHref && (
-            <a
-              href={telHref}
-              onClick={(e) => e.stopPropagation()}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50 active:scale-95"
-              title="Позвонить"
-            >
-              <Phone className="h-3.5 w-3.5" />
-            </a>
-          )}
-          {canMessage && onMessage && (
-            <button
-              type="button"
-              onClick={() => onMessage(client)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-admin-textMuted transition hover:bg-admin-accentSoft hover:text-admin-accent active:scale-95"
-              title="Написать"
-            >
-              <MessageCircle className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              onClick={() => onDelete(client)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-admin-textMuted opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus:opacity-100 active:scale-95"
-              title="Удалить"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+        <ClientListActionBar
+          telHref={telHref}
+          canMessage={canMessage}
+          onMessage={onMessage}
+          onDelete={onDelete}
+          client={client}
+        />
+      </article>
     </li>
   );
 }
@@ -156,6 +136,11 @@ export default function ClientsSection({
     [clients, search]
   );
 
+  const totalSpent = useMemo(
+    () => clients.reduce((sum, c) => sum + (Number(c.total_spent) || 0), 0),
+    [clients]
+  );
+
   const switchTab = (next) => {
     setTab(next);
     onTabChange?.(next);
@@ -177,144 +162,152 @@ export default function ClientsSection({
   const isClientsTab = tab === 'clients';
 
   return (
-    <Card className="overflow-hidden !p-0">
-      <div className="border-b border-admin-border px-4 py-4 sm:px-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                isClientsTab ? 'bg-admin-accentSoft text-admin-accent' : 'bg-red-50 text-red-600'
-              }`}
-            >
-              {isClientsTab ? <Users className="h-5 w-5" /> : <ShieldOff className="h-5 w-5" />}
+    <div className="overview-shell -mx-1 space-y-4 rounded-[1.75rem] px-1 pb-2">
+      <section className="relative overflow-hidden rounded-[1.35rem] bg-gradient-to-br from-[#5B4FCF] via-[#6A5ACD] to-[#4338CA] px-4 py-5 text-white shadow-xl shadow-violet-500/20">
+        <div className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/10 blur-2xl" />
+        <div className="relative flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/70">База клиентов</p>
+            <h1 className="mt-1 font-display text-2xl font-bold">{isClientsTab ? clients.length : blacklistCount}</h1>
+            <p className="mt-1 text-sm text-white/75">
+              {isClientsTab
+                ? clients.length
+                  ? 'контактов для записи и рассылок'
+                  : 'появятся после первой онлайн-записи'
+                : 'заблокированы для онлайн-записи'}
+            </p>
+          </div>
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/20">
+            {isClientsTab ? <Users className="h-5 w-5" /> : <ShieldOff className="h-5 w-5" />}
+          </div>
+        </div>
+        {isClientsTab && clients.length > 0 ? (
+          <div className="relative mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-2xl bg-white/10 px-3 py-2.5 ring-1 ring-white/15">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-white/65">В базе</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums">{clients.length}</p>
             </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-bold text-admin-text">Клиенты</h2>
-              <p className="text-xs text-admin-textMuted">
-                {isClientsTab
-                  ? clients.length
-                    ? `${clients.length} в базе`
-                    : 'Появятся после записи через MAX или Telegram'
-                  : blacklistCount
-                    ? `${blacklistCount} заблокировано`
-                    : 'Онлайн-запись закрыта для заблокированных'}
-              </p>
+            <div className="rounded-2xl bg-white/10 px-3 py-2.5 ring-1 ring-white/15">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-white/65">Выручка</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums">{formatPrice(totalSpent)}</p>
             </div>
           </div>
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+        ) : null}
+      </section>
+
+      <section className="overflow-hidden rounded-[1.35rem] bg-white shadow-[0_8px_30px_rgba(15,23,42,0.05)] ring-1 ring-slate-200/70">
+        <div className="border-b border-slate-100 p-3 sm:p-4">
+          <div className="flex flex-wrap gap-2">
             {isClientsTab ? (
               <>
-                {clients.length > 0 && (
-                  <Button variant="secondary" size="sm" onClick={handleExport} loading={exporting} className="flex-1 sm:flex-none">
+                {clients.length > 0 ? (
+                  <Button variant="secondary" size="sm" onClick={handleExport} loading={exporting}>
                     <Download className="h-3.5 w-3.5" />
                     CSV
                   </Button>
-                )}
-                <Button size="sm" onClick={onBroadcast} className="flex-1 sm:flex-none">
+                ) : null}
+                <Button size="sm" onClick={onBroadcast}>
                   Рассылка
                 </Button>
               </>
             ) : (
-              <Button size="sm" onClick={() => setShowBlacklistAdd(true)} className="flex-1 sm:flex-none">
+              <Button size="sm" onClick={() => setShowBlacklistAdd(true)}>
                 <Plus className="h-3.5 w-3.5" />
                 Добавить
               </Button>
             )}
           </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => switchTab('clients')}
+              className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                isClientsTab ? 'bg-white text-violet-700 shadow-sm' : 'text-admin-textSecondary'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              Клиенты
+              {clients.length > 0 ? (
+                <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+                  {clients.length}
+                </span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              onClick={() => switchTab('blacklist')}
+              className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                !isClientsTab ? 'bg-white text-red-600 shadow-sm' : 'text-admin-textSecondary'
+              }`}
+            >
+              <ShieldOff className="h-4 w-4" />
+              Чёрный список
+              {blacklistCount > 0 ? (
+                <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+                  {blacklistCount}
+                </span>
+              ) : null}
+            </button>
+          </div>
+
+          {isClientsTab && clients.length > 0 ? (
+            <div className="relative mt-3">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-textMuted" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Имя или телефон"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm text-admin-text outline-none transition focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100"
+              />
+            </div>
+          ) : null}
         </div>
 
-        <div className="mt-3 flex gap-1 rounded-xl bg-admin-bg p-1">
-          <button
-            type="button"
-            onClick={() => switchTab('clients')}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-              isClientsTab
-                ? 'bg-white text-admin-accent shadow-sm ring-1 ring-admin-accent/20'
-                : 'text-admin-textSecondary hover:text-admin-text hover:bg-white/60'
-            }`}
-          >
-            <Users className="h-4 w-4" />
-            <span>Клиенты</span>
-            {clients.length > 0 && (
-              <span className="rounded-md bg-admin-accentSoft px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-admin-accent">
-                {clients.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => switchTab('blacklist')}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-              !isClientsTab
-                ? 'bg-white text-red-600 shadow-sm ring-1 ring-red-200'
-                : 'text-admin-textSecondary hover:text-admin-text hover:bg-white/60'
-            }`}
-          >
-            <ShieldOff className="h-4 w-4" />
-            <span>Чёрный список</span>
-            {blacklistCount > 0 && (
-              <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-red-600">
-                {blacklistCount}
-              </span>
-            )}
-          </button>
+        <div className="p-3 sm:p-4">
+          {isClientsTab ? (
+            clients.length === 0 ? (
+              <EmptyState
+                icon="◎"
+                title="Клиентов пока нет"
+                description="Они появятся после входа через MAX или Telegram"
+              />
+            ) : filtered.length === 0 ? (
+              <p className="py-10 text-center text-sm text-admin-textMuted">Никого не найдено</p>
+            ) : (
+              <>
+                <ul className="space-y-3">
+                  {filtered.map((client) => (
+                    <ClientCard
+                      key={client.id}
+                      client={client}
+                      onOpen={onOpen}
+                      onMessage={onMessage}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                </ul>
+                {search.trim() ? (
+                  <p className="mt-3 text-center text-[11px] text-admin-textMuted">
+                    Показано {filtered.length} из {clients.length}
+                  </p>
+                ) : null}
+              </>
+            )
+          ) : (
+            <BlacklistSection
+              embedded
+              cardLayout
+              api={api}
+              toast={toast}
+              showAddModal={showBlacklistAdd}
+              onShowAddModalChange={setShowBlacklistAdd}
+              onLoaded={(items) => setBlacklistCount(items.length)}
+            />
+          )}
         </div>
-
-        {isClientsTab && clients.length > 0 && (
-          <div className="relative mt-3">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-textMuted" />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Поиск по имени или телефону"
-              className="input-field h-10 pl-10 text-sm"
-            />
-          </div>
-        )}
-      </div>
-
-      {isClientsTab ? (
-        clients.length === 0 ? (
-          <div className="p-4 sm:p-5">
-            <EmptyState
-              icon="◎"
-              title="Клиентов пока нет"
-              description="Они появятся после входа через MAX или Telegram"
-            />
-          </div>
-        ) : filtered.length === 0 ? (
-          <p className="py-10 text-center text-sm text-admin-textMuted">Никого не найдено</p>
-        ) : (
-          <>
-            <ul className="divide-y divide-admin-border/80">
-              {filtered.map((client) => (
-                <ClientRow
-                  key={client.id}
-                  client={client}
-                  onOpen={onOpen}
-                  onMessage={onMessage}
-                  onDelete={onDelete}
-                />
-              ))}
-            </ul>
-            {search.trim() ? (
-              <p className="border-t border-admin-border/60 px-4 py-2 text-center text-[11px] text-admin-textMuted">
-                Показано {filtered.length} из {clients.length}
-              </p>
-            ) : null}
-          </>
-        )
-      ) : (
-        <BlacklistSection
-          embedded
-          api={api}
-          toast={toast}
-          showAddModal={showBlacklistAdd}
-          onShowAddModalChange={setShowBlacklistAdd}
-          onLoaded={(items) => setBlacklistCount(items.length)}
-        />
-      )}
-    </Card>
+      </section>
+    </div>
   );
 }

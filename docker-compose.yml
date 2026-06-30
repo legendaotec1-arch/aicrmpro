@@ -8,16 +8,20 @@ services:
       POSTGRES_DB: crm_max
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres123
-    ports:
-      - "5432:5432"
+    # Порт НЕ публикуется наружу — доступ только из docker-network.
+    # Внешний отладочный доступ — через `docker exec -it crm_max_db psql -U postgres`.
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crm_max"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
 
   backend:
     build:

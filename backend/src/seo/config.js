@@ -21,7 +21,6 @@ const CLUSTERS = {
 
 const STATIC_ROUTES = [
   { path: '/', changefreq: 'weekly', priority: 1.0 },
-  { path: '/register', changefreq: 'monthly', priority: 0.9 },
   { path: '/seo', changefreq: 'weekly', priority: 0.8 },
   { path: '/resheniya', changefreq: 'weekly', priority: 0.8 },
   { path: '/funkcii', changefreq: 'weekly', priority: 0.8 },

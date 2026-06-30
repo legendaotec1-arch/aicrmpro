@@ -9,8 +9,10 @@ import {
   Globe,
   Lightbulb,
   MousePointerClick,
+  Newspaper,
   RefreshCw,
   Search,
+  Sparkles,
   TrendingUp,
   XCircle,
 } from 'lucide-react';
@@ -112,6 +114,10 @@ export default function AdminSeoTab() {
   const [runningIntel, setRunningIntel] = useState(false);
   const [indexNow, setIndexNow] = useState(null);
   const [submittingIndexNow, setSubmittingIndexNow] = useState(false);
+  const [articleStats, setArticleStats] = useState(null);
+  const [syncingArticles, setSyncingArticles] = useState(false);
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [articleSyncMsg, setArticleSyncMsg] = useState('');
 
   const loadExternalLinks = useCallback(async () => {
     try {
@@ -127,13 +133,15 @@ export default function AdminSeoTab() {
     else setRefreshing(true);
     setError('');
     try {
-      const [dashRes, indexNowRes] = await Promise.all([
+      const [dashRes, indexNowRes, articlesRes] = await Promise.all([
         seoAdminApi.get('/dashboard'),
         seoAdminApi.get('/indexnow/status').catch(() => ({ data: null })),
+        seoAdminApi.get('/articles/stats').catch(() => ({ data: null })),
       ]);
       await loadExternalLinks();
       setData(dashRes.data);
       setIndexNow(indexNowRes?.data || null);
+      setArticleStats(articlesRes?.data || null);
     } catch (err) {
       setError(err?.response?.data?.error || 'Не удалось загрузить SEO-панель');
     } finally {
@@ -202,6 +210,62 @@ export default function AdminSeoTab() {
       setError(err?.response?.data?.error || 'Ошибка SEO-анализа');
     } finally {
       setRunningIntel(false);
+    }
+  };
+
+  const generateAiArticles = async () => {
+    setGeneratingAi(true);
+    setError('');
+    setArticleSyncMsg('');
+    try {
+      const limit = articleStats?.aiBatchSize || 10;
+      const res = await seoAdminApi.post('/articles/ai-generate', { limit });
+      const r = res.data;
+      if (r.started) {
+        setArticleSyncMsg(`AI: запущено в фоне (до ${r.limit} статей). Обновим статистику через ~30 сек.`);
+        setTimeout(async () => {
+          try {
+            const statsRes = await seoAdminApi.get('/articles/stats');
+            setArticleStats(statsRes.data);
+          } catch {}
+        }, 30_000);
+        return;
+      }
+      setArticleSyncMsg(
+        `AI: готово ${r.enriched}, ошибок ${r.failed}`
+        + (r.skipped ? ` (${r.reason || 'пропуск'})` : '')
+        + `. Всего AI-статей: ${r.aiTotal ?? '—'}`
+      );
+      const statsRes = await seoAdminApi.get('/articles/stats');
+      setArticleStats(statsRes.data);
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Ошибка AI-генерации статей');
+    } finally {
+      setGeneratingAi(false);
+    }
+  };
+
+  const syncArticles = async () => {
+    setSyncingArticles(true);
+    setError('');
+    setArticleSyncMsg('');
+    try {
+      const res = await seoAdminApi.post('/articles/sync', { reschedule: 'pending' });
+      const s = res.data;
+      setArticleSyncMsg(
+        `Каталог: ${s.catalog}, опубликовано: ${s.live}, в очереди: ${s.scheduled}`
+        + (s.added ? `, добавлено: ${s.added}` : '')
+        + (s.rescheduled ? `, перепланировано: ${s.rescheduled}` : '')
+        + (s.aiEnrichment?.enriched ? `, AI: ${s.aiEnrichment.enriched}` : '')
+        + ` (${s.articlesPerDay || articleStats?.articlesPerDay || 10} в день)`
+      );
+      const statsRes = await seoAdminApi.get('/articles/stats');
+      setArticleStats(statsRes.data);
+      await load(true);
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Ошибка синхронизации статей');
+    } finally {
+      setSyncingArticles(false);
     }
   };
 
@@ -414,6 +478,85 @@ export default function AdminSeoTab() {
             </ul>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-slate-900">
+              <Newspaper size={18} className="text-violet-600" />
+              <h3 className="font-semibold">Автоблог</h3>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Публикация: <strong>{articleStats?.articlesPerDay ?? 10} статей в день</strong>
+              {' · '}
+              AI OpenRouter:{' '}
+              <strong className={articleStats?.openRouterConfigured ? 'text-emerald-700' : 'text-amber-700'}>
+                {articleStats?.openRouterConfigured ? 'подключён' : 'нет ключа'}
+              </strong>
+              {' · '}
+              В каталоге: {fmtNum(articleStats?.catalogSize)} шаблонов
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={syncArticles} loading={syncingArticles}>
+              <Newspaper size={16} className="mr-1.5" />
+              Синхронизировать
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={generateAiArticles}
+              loading={generatingAi}
+              disabled={!articleStats?.openRouterConfigured}
+            >
+              <Sparkles size={16} className="mr-1.5" />
+              AI: {articleStats?.aiBatchSize ?? 10} статей
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl bg-violet-50 px-4 py-3">
+            <p className="text-xs text-violet-700">AI-контент</p>
+            <p className="text-2xl font-bold text-violet-900">{fmtNum(articleStats?.ai_total)}</p>
+            <p className="text-xs text-violet-600">в очереди AI: {fmtNum(articleStats?.ai_pending)}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 px-4 py-3">
+            <p className="text-xs text-slate-600">Шаблон в очереди</p>
+            <p className="text-2xl font-bold text-slate-900">{fmtNum(articleStats?.template_pending)}</p>
+          </div>
+          <div className="rounded-xl bg-emerald-50 px-4 py-3">
+            <p className="text-xs text-emerald-700">Опубликовано</p>
+            <p className="text-2xl font-bold text-emerald-900">{fmtNum(articleStats?.live)}</p>
+          </div>
+          <div className="rounded-xl bg-amber-50 px-4 py-3">
+            <p className="text-xs text-amber-700">Всего в очереди</p>
+            <p className="text-2xl font-bold text-amber-900">{fmtNum(articleStats?.scheduled)}</p>
+          </div>
+        </div>
+        {articleStats?.nextPublications?.length ? (
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ближайшие публикации</p>
+            <ul className="mt-2 space-y-1 text-sm text-slate-600">
+              {articleStats.nextPublications.map((row) => (
+                <li key={row.slug} className="flex flex-wrap justify-between gap-2">
+                  <span className="truncate font-mono text-xs">
+                    {row.slug}
+                    {row.content_source === 'ai' ? (
+                      <span className="ml-1 rounded bg-violet-100 px-1 text-[10px] text-violet-700">AI</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 text-slate-400">
+                    {new Date(row.published_at).toLocaleString('ru-RU')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {articleSyncMsg ? (
+          <p className="mt-3 rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-900">{articleSyncMsg}</p>
+        ) : null}
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">

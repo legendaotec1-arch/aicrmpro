@@ -4,6 +4,7 @@ const {
   buildSchedule,
   buildScheduleAfter,
   getLastScheduledDate,
+  reschedulePendingArticles,
   ARTICLES_PER_DAY,
 } = require('./publicationSchedule');
 
@@ -42,6 +43,14 @@ async function upsertArticle(client, article, publishedAt) {
 }
 
 async function updateArticleContent(client, article) {
+  const existing = await client.query(
+    `SELECT content_source FROM seo_articles WHERE slug = $1`,
+    [article.slug]
+  );
+  if (existing.rows[0]?.content_source === 'ai') {
+    return false;
+  }
+
   await client.query(
     `UPDATE seo_articles SET
        category = $2, title = $3, meta_description = $4, h1 = $5,
@@ -61,19 +70,22 @@ async function updateArticleContent(client, article) {
       article.related_slugs,
     ]
   );
+  return true;
 }
 
-/** Синхронизирует каталог статей с БД; новые планируются по 2 в день */
-async function syncArticlePipeline(dbConn = db) {
+/** Синхронизирует каталог статей с БД; новые планируются по SEO_ARTICLES_PER_DAY в день */
+/** @param {{ enrichAi?: boolean }} [options] */
+async function syncArticlePipeline(dbConn = db, { enrichAi = true } = {}) {
   const catalog = generateNicheArticles();
   const client = await dbConn.connect();
+  let newArticles = [];
 
   try {
     await client.query('BEGIN');
 
     const existingRes = await client.query('SELECT slug FROM seo_articles');
     const existingSlugs = new Set(existingRes.rows.map((r) => r.slug));
-    const newArticles = catalog.filter((a) => !existingSlugs.has(a.slug));
+    newArticles = catalog.filter((a) => !existingSlugs.has(a.slug));
 
     if (newArticles.length) {
       const last = await getLastScheduledDate(client);
@@ -94,7 +106,25 @@ async function syncArticlePipeline(dbConn = db) {
     }
 
     await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
+  let aiEnrichment = { enriched: 0, failed: 0, skipped: true };
+  if (enrichAi) {
+    try {
+      const { enrichUpcomingArticles } = require('./articleAiEnricher');
+      aiEnrichment = await enrichUpcomingArticles(dbConn);
+    } catch (err) {
+      console.warn('[seo-cron] AI enrichment:', err.message);
+      aiEnrichment = { enriched: 0, failed: 0, skipped: false, errors: [err.message] };
+    }
+  }
+
+  try {
     const stats = await dbConn.query(`
       SELECT
         COUNT(*)::int AS total,
@@ -120,39 +150,42 @@ async function syncArticlePipeline(dbConn = db) {
       catalog: catalog.length,
       added: newArticles.length,
       articlesPerDay: ARTICLES_PER_DAY,
+      aiEnrichment,
       ...stats.rows[0],
     };
   } catch (err) {
-    await client.query('ROLLBACK');
     throw err;
-  } finally {
-    client.release();
   }
 }
 
 function startArticleCron() {
   const cron = require('node-cron');
 
-  cron.schedule('5 5 * * *', async () => {
+  const runSync = async (label, enrichAi = false) => {
     try {
-      const result = await syncArticlePipeline();
-      if (result.added > 0) {
+      const result = await syncArticlePipeline(undefined, { enrichAi });
+      if (result.added > 0 || result.aiEnrichment?.enriched > 0) {
         console.log(
-          `[seo-cron] +${result.added} articles (2/day). Live: ${result.live}, queued: ${result.scheduled}`
+          `[seo-cron] ${label}: +${result.added} catalog, AI ${result.aiEnrichment?.enriched || 0} (${ARTICLES_PER_DAY}/day). Live: ${result.live}, queued: ${result.scheduled}`
         );
       }
       const db = require('../config/database');
       const { notifyIndexNowLater, getRecentlyPublishedArticleUrls } = require('./indexNow');
-      const urls = await getRecentlyPublishedArticleUrls(db, 26);
+      const urls = await getRecentlyPublishedArticleUrls(db, 30);
       if (urls.length) {
-        notifyIndexNowLater(urls, { logPrefix: '[indexnow] cron' });
+        notifyIndexNowLater(urls, { logPrefix: `[indexnow] cron ${label}` });
       }
     } catch (err) {
-      console.error('[seo-cron] Article sync failed:', err.message);
+      console.error(`[seo-cron] Article sync failed (${label}):`, err.message);
     }
-  });
+  };
 
-  console.log('[seo-cron] Auto articles: 2/day, daily check 05:05 UTC');
+  // Утро UTC — синхронизация каталога + AI-контент на день
+  cron.schedule('5 5 * * *', () => runSync('05:05', true));
+  // Вечер UTC — только синхронизация шаблонов
+  cron.schedule('5 17 * * *', () => runSync('17:05', false));
+
+  console.log(`[seo-cron] Auto articles: ${ARTICLES_PER_DAY}/day, AI batch morning, sync 05:05 & 17:05 UTC`);
 }
 
-module.exports = { syncArticlePipeline, startArticleCron, upsertArticle };
+module.exports = { syncArticlePipeline, startArticleCron, upsertArticle, reschedulePendingArticles };

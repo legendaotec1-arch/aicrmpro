@@ -11,7 +11,9 @@ export default function SeoHead({
   ogImage = DEFAULT_OG,
   hreflang = 'ru',
 }) {
-  const url = canonical || SITE_URL;
+  const url = canonical
+    ? (canonical.startsWith('http') ? canonical : `${SITE_URL}${canonical.startsWith('/') ? canonical : `/${canonical}`}`)
+    : SITE_URL;
 
   return (
     <Helmet>

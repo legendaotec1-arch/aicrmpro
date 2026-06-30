@@ -1,30 +1,47 @@
-/** Публикация: ровно 2 статьи в день. */
+/** Публикация: N статей в день (SEO_ARTICLES_PER_DAY, по умолчанию 10). */
 
-const ARTICLES_PER_DAY = 2;
+const ARTICLES_PER_DAY = Math.max(
+  1,
+  Math.min(50, Number(process.env.SEO_ARTICLES_PER_DAY) || 10)
+);
+
+/** Окно публикации UTC: 05:00–20:00 ≈ 08:00–23:00 МСК */
+const PUBLISH_WINDOW_START_UTC = 5;
+const PUBLISH_WINDOW_HOURS = 15;
 
 function startOfDayUtc(date) {
   const d = new Date(date);
-  d.setUTCHours(8, 0, 0, 0);
+  d.setUTCHours(PUBLISH_WINDOW_START_UTC, 0, 0, 0);
   return d;
+}
+
+function slotToPublishedAt(dayStart, slotInDay) {
+  const totalMinutes = Math.floor((PUBLISH_WINDOW_HOURS * 60 * slotInDay) / ARTICLES_PER_DAY);
+  const publishedAt = new Date(dayStart);
+  publishedAt.setUTCHours(
+    PUBLISH_WINDOW_START_UTC + Math.floor(totalMinutes / 60),
+    totalMinutes % 60,
+    0,
+    0
+  );
+  return publishedAt;
 }
 
 function buildSchedule(slugs, startDate = new Date()) {
   const schedule = new Map();
   let dayIndex = 0;
   let slotInDay = 0;
-  let cursor = startOfDayUtc(startDate);
+  let dayStart = startOfDayUtc(startDate);
 
   for (const slug of slugs) {
     if (slotInDay >= ARTICLES_PER_DAY) {
       dayIndex += 1;
       slotInDay = 0;
-      cursor = startOfDayUtc(startDate);
-      cursor.setUTCDate(cursor.getUTCDate() + dayIndex);
+      dayStart = startOfDayUtc(startDate);
+      dayStart.setUTCDate(dayStart.getUTCDate() + dayIndex);
     }
 
-    const publishedAt = new Date(cursor);
-    publishedAt.setUTCHours(8 + slotInDay * 5, (slotInDay * 17) % 60, 0, 0);
-    schedule.set(slug, publishedAt.toISOString());
+    schedule.set(slug, slotToPublishedAt(dayStart, slotInDay).toISOString());
     slotInDay += 1;
   }
 
@@ -81,6 +98,21 @@ async function scheduleNewSlugs(client, newSlugs) {
   return applySchedule(client, schedule);
 }
 
+/** Пересобрать расписание только для ещё не опубликованных статей */
+async function reschedulePendingArticles(client, startDate = new Date()) {
+  const res = await client.query(
+    `SELECT slug FROM seo_articles
+     WHERE published = TRUE AND published_at > NOW()
+     ORDER BY published_at ASC, slug`
+  );
+  const slugs = res.rows.map((r) => r.slug);
+  if (!slugs.length) return { rescheduled: 0, articlesPerDay: ARTICLES_PER_DAY };
+
+  const schedule = buildSchedule(slugs, startDate);
+  const count = await applySchedule(client, schedule);
+  return { rescheduled: count, articlesPerDay: ARTICLES_PER_DAY };
+}
+
 async function ensurePublicationSchedule(client, { force = false } = {}) {
   const res = await client.query(
     `SELECT slug FROM seo_articles WHERE published = TRUE ORDER BY category, slug`
@@ -106,6 +138,7 @@ module.exports = {
   buildSchedule,
   buildScheduleAfter,
   ensurePublicationSchedule,
+  reschedulePendingArticles,
   getScheduledPublishedAt,
   scheduleNewSlugs,
   getLastScheduledDate,

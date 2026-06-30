@@ -68,7 +68,7 @@ export default function PressPage({ mode = 'press' }) {
             ? 'Готовые ссылки с UTM для блогов партнёров, школ и салонов.'
             : 'Логотипы, описание, RSS для Дзена, гайды для VC.ru и Habr.'
         }
-        canonical={isPartners ? '/partners' : '/press'}
+        canonical={isPartners ? 'https://woner.ru/partners' : 'https://woner.ru/press'}
       />
       <SiteHeader
         showCta={false}

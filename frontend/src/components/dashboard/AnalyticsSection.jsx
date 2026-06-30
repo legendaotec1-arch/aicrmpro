@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  BarChart3,
   CalendarCheck,
   Download,
   FileSpreadsheet,
@@ -8,13 +9,12 @@ import {
   Users,
   Wallet
 } from 'lucide-react';
-import Card, { CardHeader } from '../ui/Card';
-import { StatCard } from '../layout/DashboardLayout';
+import Button from '../ui/Button';
 import { PageLoader } from '../ui/Spinner';
 import SalonMasterAvatar from '../client/SalonMasterAvatar';
 import { formatPrice } from '../../lib/format';
 
-const CHART_HEIGHT = 140;
+const CHART_HEIGHT = 120;
 
 function currentMonthKey() {
   const now = new Date();
@@ -27,12 +27,14 @@ function monthOptions() {
   for (let i = 0; i < 13; i += 1) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const short = d.toLocaleDateString('ru-RU', { month: 'short' }).replace('.', '');
     const label =
       i === 0
-        ? 'Текущий месяц'
+        ? 'Сейчас'
         : d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
     items.push({
       value,
+      short: i === 0 ? 'Сейчас' : `${short} ${String(d.getFullYear()).slice(2)}`,
       label: label.charAt(0).toUpperCase() + label.slice(1)
     });
   }
@@ -44,32 +46,40 @@ function formatChartDay(dateStr) {
   return `${dateStr.slice(8, 10)}.${dateStr.slice(5, 7)}`;
 }
 
-function LeaderBadge({ label, master }) {
+function MetricCell({ icon: Icon, label, value, tone = 'slate' }) {
+  const tones = {
+    slate: 'bg-slate-100 text-slate-600',
+    violet: 'bg-violet-100 text-violet-600',
+    emerald: 'bg-emerald-100 text-emerald-600',
+    amber: 'bg-amber-100 text-amber-600'
+  };
+
+  return (
+    <div className="px-3 py-3.5 text-center sm:px-4 sm:py-4">
+      <div className={`mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-lg ${tones[tone]}`}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-admin-textMuted">{label}</p>
+      <p className="mt-1 text-base font-bold tabular-nums text-admin-text sm:text-lg">{value}</p>
+    </div>
+  );
+}
+
+function LeaderCard({ label, master }) {
   if (!master) return null;
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 via-orange-50/80 to-amber-50 px-3 py-3 shadow-sm">
+    <div className="flex min-w-0 items-center gap-2.5 rounded-[1.1rem] bg-amber-50/90 px-3 py-2.5 ring-1 ring-amber-200/80">
       <SalonMasterAvatar
         master={master}
-        size={48}
+        size={40}
         radius={9999}
-        className="ring-2 ring-white shadow-md"
-        fallbackStyle={{
-          background: 'linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)',
-          color: '#fff'
-        }}
+        className="ring-2 ring-white"
+        fallbackStyle={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)', color: '#fff' }}
       />
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700/80">{label}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800/70">{label}</p>
         <p className="truncate text-sm font-bold text-amber-950">{master.name}</p>
-        <p className="mt-0.5 text-sm font-bold tabular-nums text-emerald-700">
-          {formatPrice(master.master_share)}
-          <span className="ml-1 text-[11px] font-medium text-emerald-600/80">к выплате</span>
-        </p>
-        {master.metric_value != null && master.metric_label && (
-          <p className="text-[11px] text-amber-800/70">
-            {master.metric_value} {master.metric_label}
-          </p>
-        )}
+        <p className="text-xs font-bold tabular-nums text-emerald-700">{formatPrice(master.master_share)}</p>
       </div>
     </div>
   );
@@ -77,67 +87,48 @@ function LeaderBadge({ label, master }) {
 
 function MasterPayoutCard({ master, onExport, exporting }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-admin-border bg-white p-3 shadow-sm">
+    <div className="flex items-center gap-3 rounded-[1.1rem] bg-white p-3 ring-1 ring-slate-200/80">
       <SalonMasterAvatar
         master={master}
-        size={52}
+        size={48}
         radius={9999}
-        className="ring-2 ring-admin-border/50"
-        fallbackStyle={{
-          background: 'linear-gradient(135deg, #8b5cf6 0%, #6A5ACD 100%)',
-          color: '#fff'
-        }}
+        className="ring-2 ring-slate-100"
+        fallbackStyle={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6A5ACD 100%)', color: '#fff' }}
       />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-admin-text">{master.name}</p>
         <p className="text-xs text-admin-textMuted">
           {master.commission_percent}% · {master.appointments} записей
         </p>
-        <p className="mt-1 font-display text-lg font-bold tabular-nums text-emerald-700">
-          {formatPrice(master.master_share)}
-        </p>
+        <p className="mt-1 text-lg font-bold tabular-nums text-emerald-700">{formatPrice(master.master_share)}</p>
       </div>
-      {master.salon_master_id && (
+      {master.salon_master_id ? (
         <button
           type="button"
           title="Excel за месяц"
           disabled={exporting}
           onClick={() => onExport(master.salon_master_id)}
-          className="shrink-0 rounded-xl p-2 text-[#217346] hover:bg-green-50 transition disabled:opacity-50"
+          className="shrink-0 rounded-xl p-2 text-[#217346] transition hover:bg-green-50 disabled:opacity-50"
         >
           <Download className="h-4 w-4" />
         </button>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function PayoutTile({ title, gross, mastersShare, salonShare, appointments, accent }) {
+function SectionShell({ title, description, children, action }) {
   return (
-    <div
-      className={`rounded-2xl border p-4 ${
-        accent
-          ? 'border-violet-200/80 bg-gradient-to-br from-violet-50 via-white to-indigo-50'
-          : 'border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50'
-      }`}
-    >
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-admin-textMuted">{title}</p>
-      <p className="mt-2 font-display text-2xl font-bold tabular-nums text-admin-text">
-        {formatPrice(mastersShare)}
-      </p>
-      <p className="mt-1 text-xs text-admin-textMuted">к выплате мастерам</p>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-lg bg-white/80 px-2.5 py-2 border border-admin-border/60">
-          <p className="text-admin-textMuted">Выручка</p>
-          <p className="font-bold text-admin-text tabular-nums">{formatPrice(gross)}</p>
+    <section className="overflow-hidden rounded-[1.35rem] bg-white shadow-[0_8px_30px_rgba(15,23,42,0.05)] ring-1 ring-slate-200/70">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3.5 sm:px-5">
+        <div>
+          <h2 className="text-base font-bold text-admin-text">{title}</h2>
+          {description ? <p className="mt-0.5 text-xs text-admin-textMuted">{description}</p> : null}
         </div>
-        <div className="rounded-lg bg-white/80 px-2.5 py-2 border border-admin-border/60">
-          <p className="text-admin-textMuted">Салону</p>
-          <p className="font-bold text-violet-700 tabular-nums">{formatPrice(salonShare)}</p>
-        </div>
+        {action}
       </div>
-      <p className="mt-2 text-[11px] text-admin-textMuted">{appointments} завершённых записей</p>
-    </div>
+      <div className="p-4 sm:p-5">{children}</div>
+    </section>
   );
 }
 
@@ -173,9 +164,7 @@ export default function AnalyticsSection({ api, toast }) {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = masterId
-        ? `analitika-master-${month}.xlsx`
-        : `analitika-salon-${month}.xlsx`;
+      a.download = masterId ? `analitika-master-${month}.xlsx` : `analitika-salon-${month}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
       toast('Отчёт скачан', 'success');
@@ -186,10 +175,16 @@ export default function AnalyticsSection({ api, toast }) {
     }
   };
 
-  if (loading) return <PageLoader />;
+  if (loading) {
+    return (
+      <div className="flex justify-center py-16">
+        <PageLoader />
+      </div>
+    );
+  }
 
   if (!data) {
-    return <p className="text-sm text-admin-textMuted text-center py-12">Нет данных</p>;
+    return <p className="py-12 text-center text-sm text-admin-textMuted">Нет данных</p>;
   }
 
   const {
@@ -216,126 +211,141 @@ export default function AnalyticsSection({ api, toast }) {
   function dayBarHeights(d) {
     const total = d.appointments ?? 0;
     if (total <= 0) return { total: 3, completed: 0, confirmed: 0, negative: 0 };
-    const barTotal = Math.max(16, Math.round((total / maxChart) * CHART_HEIGHT));
+    const barTotal = Math.max(12, Math.round((total / maxChart) * CHART_HEIGHT));
     const completed = d.completed ?? 0;
     const confirmed = d.confirmed ?? 0;
-    const negative = d.negative ?? 0;
     const completedH = Math.round((completed / total) * barTotal);
     const confirmedH = Math.round((confirmed / total) * barTotal);
     const negativeH = Math.max(0, barTotal - completedH - confirmedH);
     return { total: barTotal, completed: completedH, confirmed: confirmedH, negative: negativeH };
   }
 
-  const monthLabel =
-    months.find((m) => m.value === month)?.label || month_label;
+  const monthLabel = months.find((m) => m.value === month)?.label || month_label;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-2">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-admin-textMuted">
-            Период (с 1-го числа)
-          </label>
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="w-full max-w-xs rounded-xl border border-admin-border bg-white px-3 py-2.5 text-sm font-medium text-admin-text shadow-sm focus:border-admin-accent focus:outline-none focus:ring-2 focus:ring-admin-accent/20"
-          >
-            {months.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          {!is_current_month && (
-            <p className="text-xs text-admin-textMuted">
-              Архивный месяц — данные зафиксированы. Выгрузите в Excel для отчётности.
-            </p>
-          )}
+    <div className="overview-shell -mx-1 space-y-4 rounded-[1.75rem] px-1 pb-2">
+      <section className="relative overflow-hidden rounded-[1.35rem] bg-gradient-to-br from-[#5B4FCF] via-[#6A5ACD] to-[#4338CA] px-4 py-5 text-white shadow-xl shadow-violet-500/20 sm:px-5">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/70">Аналитика</p>
+            <h1 className="mt-1 font-display text-2xl font-bold tabular-nums sm:text-3xl">
+              {formatPrice(summary.revenue)}
+            </h1>
+            <p className="mt-1 text-sm text-white/75">{monthLabel} · завершённые записи</p>
+          </div>
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/20">
+            <BarChart3 className="h-5 w-5" />
+          </div>
         </div>
 
-        <button
-          type="button"
-          disabled={exporting}
-          onClick={() => downloadExport()}
-          className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-[#217346] px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-green-900/25 transition hover:bg-[#1a5c38] hover:shadow-green-900/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#217346] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 lg:w-auto lg:min-w-[220px]"
-        >
-          {exporting ? (
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-          ) : (
-            <FileSpreadsheet className="h-5 w-5" strokeWidth={2.25} />
-          )}
-          Выгрузить Excel за месяц
-        </button>
-      </div>
+        <div className="relative mt-4 grid grid-cols-2 gap-2">
+          <div className="rounded-2xl bg-white/10 px-3 py-2.5 ring-1 ring-white/15">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-white/65">Мастерам</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums">{formatPrice(summary.masters_share)}</p>
+          </div>
+          <div className="rounded-2xl bg-white/10 px-3 py-2.5 ring-1 ring-white/15">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-white/65">Салону</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums">{formatPrice(summary.salon_share)}</p>
+          </div>
+        </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <StatCard
-          label="Выручка"
-          value={formatPrice(summary.revenue)}
-          hint={`${monthLabel} · завершённые`}
-          accent="text-admin-accent"
-        />
-        <StatCard
-          label="Доля салона"
-          value={formatPrice(summary.salon_share)}
-          hint="прибыль владельца"
-          accent="text-violet-700"
-        />
-        <StatCard
-          label="Мастерам"
-          value={formatPrice(summary.masters_share)}
-          hint="к выплате за месяц"
-          accent="text-emerald-700"
-        />
-        <StatCard label="Записей" value={summary.appointments} hint={`завершено: ${summary.completed}`} />
-        <StatCard
-          label="Клиентов"
-          value={summary.unique_clients}
-          hint={`новых: ${summary.new_clients}`}
-        />
-        <StatCard
-          label="Отмены"
-          value={`${summary.cancellation_rate}%`}
-          hint={`${summary.cancelled} отмен`}
-        />
-      </div>
+        <div className="relative mt-4">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white/60">Период с 1-го числа</p>
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-thin">
+            {months.map((m) => {
+              const active = m.value === month;
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => setMonth(m.value)}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                    active
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'bg-white/10 text-white/85 ring-1 ring-white/15 hover:bg-white/20'
+                  }`}
+                >
+                  {m.short}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-      {summary.confirmed_pending > 0 && (
-        <div className="rounded-xl border border-sky-200/80 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
+        <div className="relative mt-4">
+          <Button
+            size="sm"
+            onClick={() => downloadExport()}
+            loading={exporting}
+            className="w-full !bg-white !text-[#217346] hover:!bg-green-50 sm:w-auto"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Excel за месяц
+          </Button>
+          {!is_current_month ? (
+            <p className="mt-2 text-[11px] text-white/65">Архивный месяц — данные зафиксированы</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-[1.35rem] bg-white shadow-[0_8px_30px_rgba(15,23,42,0.05)] ring-1 ring-slate-200/70">
+        <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
+          <MetricCell icon={Wallet} label="Записей" value={summary.appointments} tone="violet" />
+          <MetricCell icon={Users} label="Клиентов" value={summary.unique_clients} tone="emerald" />
+          <MetricCell icon={TrendingUp} label="Отмены" value={`${summary.cancellation_rate}%`} tone="amber" />
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-slate-100">
+          <MetricCell icon={CalendarCheck} label="Завершено" value={summary.completed} />
+          <MetricCell icon={Users} label="Новых" value={summary.new_clients} tone="emerald" />
+          <MetricCell icon={PiggyBank} label="Отменено" value={summary.cancelled} tone="amber" />
+        </div>
+      </section>
+
+      {summary.confirmed_pending > 0 ? (
+        <div className="rounded-[1.1rem] bg-sky-50 px-4 py-3 text-sm text-sky-900 ring-1 ring-sky-200/80">
           <span className="font-semibold">Ожидается: </span>
-          {formatPrice(summary.expected_revenue)} выручки, из них{' '}
-          {formatPrice(summary.expected_masters_share)} мастерам — по {summary.confirmed_pending}{' '}
-          подтверждённым записям (ещё не завершены).
+          {formatPrice(summary.expected_revenue)} выручки, {formatPrice(summary.expected_masters_share)} мастерам —{' '}
+          {summary.confirmed_pending} подтверждённых записей.
+        </div>
+      ) : null}
+
+      {is_current_month && payouts.today ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-[1.1rem] bg-emerald-50/80 p-4 ring-1 ring-emerald-200/70">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800/70">Сегодня</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-800">
+              {formatPrice(payouts.today.masters_share)}
+            </p>
+            <p className="mt-1 text-xs text-emerald-700/80">
+              к выплате · {payouts.today.appointments} записей · выручка {formatPrice(payouts.today.gross)}
+            </p>
+          </div>
+          <div className="rounded-[1.1rem] bg-violet-50/80 p-4 ring-1 ring-violet-200/70">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-800/70">
+              Месяц · {month_label}
+            </p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-violet-900">
+              {formatPrice(payouts.month.masters_share)}
+            </p>
+            <p className="mt-1 text-xs text-violet-700/80">
+              к выплате · {payouts.month.appointments} записей · салону {formatPrice(payouts.month.salon_share)}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {(leaders?.by_appointments || leaders?.by_clients || leaders?.by_revenue) && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          <LeaderCard label="Больше записей" master={leaders.by_appointments} />
+          <LeaderCard label="Больше клиентов" master={leaders.by_clients} />
+          <LeaderCard label="Больше выручки" master={leaders.by_revenue} />
         </div>
       )}
 
-      <div className={`grid gap-4 ${is_current_month ? 'lg:grid-cols-2' : 'lg:grid-cols-1'}`}>
-        {is_current_month && payouts.today && (
-          <PayoutTile
-            title="Сегодня"
-            gross={payouts.today.gross}
-            mastersShare={payouts.today.masters_share}
-            salonShare={payouts.today.salon_share}
-            appointments={payouts.today.appointments}
-          />
-        )}
-        <PayoutTile
-          title={is_current_month ? `Месяц (${month_label})` : monthLabel}
-          gross={payouts.month.gross}
-          mastersShare={payouts.month.masters_share}
-          salonShare={payouts.month.salon_share}
-          appointments={payouts.month.appointments}
-          accent
-        />
-      </div>
-
-      {master_payouts?.length > 0 && (
-        <Card>
-          <CardHeader
-            title="Выплата каждому мастеру"
-            description={`За ${monthLabel.toLowerCase()} · по завершённым записям`}
-          />
+      {master_payouts?.length > 0 ? (
+        <SectionShell title="Выплаты мастерам" description={`За ${monthLabel.toLowerCase()}`}>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {master_payouts.map((m) => (
               <MasterPayoutCard
@@ -346,168 +356,170 @@ export default function AnalyticsSection({ api, toast }) {
               />
             ))}
           </div>
-        </Card>
-      )}
+        </SectionShell>
+      ) : null}
 
-      {(leaders?.by_appointments || leaders?.by_clients || leaders?.by_revenue) && (
-        <div className="grid gap-2 sm:grid-cols-3">
-          <LeaderBadge label="Больше записей" master={leaders.by_appointments} />
-          <LeaderBadge label="Больше клиентов" master={leaders.by_clients} />
-          <LeaderBadge label="Больше выручки" master={leaders.by_revenue} />
-        </div>
-      )}
-
-      <Card>
-        <CardHeader
-          title="Мастера: прибыль и выплаты"
-          description="% берётся из раздела «Мастера». 1-го числа месяц начинается заново."
-        />
+      <SectionShell
+        title="Мастера"
+        description="% из раздела «Мастера» · месяц с 1-го числа"
+      >
         {by_master.length === 0 ? (
-          <p className="text-sm text-admin-textMuted py-6 text-center">
-            Нет записей с мастерами за выбранный месяц
-          </p>
+          <p className="py-6 text-center text-sm text-admin-textMuted">Нет записей за выбранный месяц</p>
         ) : (
-          <div className="overflow-x-auto -mx-1">
-            <table className="w-full min-w-[680px] text-sm">
-              <thead>
-                <tr className="border-b border-admin-border text-left text-[11px] font-semibold uppercase tracking-wide text-admin-textMuted">
-                  <th className="px-3 py-2.5">Мастер</th>
-                  <th className="px-3 py-2.5 text-right">Записей</th>
-                  <th className="px-3 py-2.5 text-right">Клиентов</th>
-                  <th className="px-3 py-2.5 text-right">%</th>
-                  <th className="px-3 py-2.5 text-right">Выручка</th>
-                  <th className="px-3 py-2.5 text-right">К выплате</th>
-                  <th className="px-3 py-2.5 text-right">Салону</th>
-                  {is_current_month && <th className="px-3 py-2.5 text-right">Сегодня</th>}
-                  <th className="px-3 py-2.5 w-10" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-admin-border/70">
-                {by_master.map((m) => {
-                  const barPct = Math.round((m.appointments / maxAppointments) * 100);
-                  return (
-                    <tr key={m.salon_master_id || m.name} className="hover:bg-admin-bg/60">
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <SalonMasterAvatar
-                            master={m}
-                            size={36}
-                            radius={9999}
-                            fallbackStyle={{
-                              background: 'linear-gradient(135deg, #8b5cf6 0%, #6A5ACD 100%)',
-                              color: '#fff',
-                              fontSize: 13
-                            }}
-                          />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-admin-text truncate">{m.name}</p>
-                            <div className="mt-1 h-1.5 w-20 max-w-full rounded-full bg-admin-border/60 overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-violet-500 to-admin-accent"
-                                style={{ width: `${barPct}%` }}
-                              />
+          <>
+            <div className="space-y-2 lg:hidden">
+              {by_master.map((m) => (
+                <div
+                  key={m.salon_master_id || m.name}
+                  className="rounded-[1.05rem] bg-slate-50 p-3 ring-1 ring-slate-200/70"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <SalonMasterAvatar
+                      master={m}
+                      size={40}
+                      radius={9999}
+                      fallbackStyle={{
+                        background: 'linear-gradient(135deg, #8b5cf6 0%, #6A5ACD 100%)',
+                        color: '#fff',
+                        fontSize: 13
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-admin-text">{m.name}</p>
+                      <p className="text-xs text-admin-textMuted">
+                        {m.appointments} зап. · {m.unique_clients} клиентов · {m.commission_percent}%
+                      </p>
+                    </div>
+                    {m.salon_master_id ? (
+                      <button
+                        type="button"
+                        disabled={exporting}
+                        onClick={() => downloadExport(m.salon_master_id)}
+                        className="rounded-lg p-1.5 text-[#217346] hover:bg-green-50 disabled:opacity-50"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+                    <div>
+                      <p className="text-admin-textMuted">Выручка</p>
+                      <p className="font-bold tabular-nums">{formatPrice(m.gross_revenue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-admin-textMuted">К выплате</p>
+                      <p className="font-bold tabular-nums text-emerald-700">{formatPrice(m.master_share)}</p>
+                    </div>
+                    <div>
+                      <p className="text-admin-textMuted">Салону</p>
+                      <p className="font-bold tabular-nums text-violet-700">{formatPrice(m.salon_share)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="-mx-1 hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-[10px] font-semibold uppercase tracking-wide text-admin-textMuted">
+                    <th className="px-3 py-2">Мастер</th>
+                    <th className="px-3 py-2 text-right">Записей</th>
+                    <th className="px-3 py-2 text-right">Клиентов</th>
+                    <th className="px-3 py-2 text-right">%</th>
+                    <th className="px-3 py-2 text-right">Выручка</th>
+                    <th className="px-3 py-2 text-right">К выплате</th>
+                    <th className="px-3 py-2 text-right">Салону</th>
+                    {is_current_month ? <th className="px-3 py-2 text-right">Сегодня</th> : null}
+                    <th className="w-10 px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {by_master.map((m) => {
+                    const barPct = Math.round((m.appointments / maxAppointments) * 100);
+                    return (
+                      <tr key={m.salon_master_id || m.name} className="hover:bg-slate-50/80">
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <SalonMasterAvatar
+                              master={m}
+                              size={32}
+                              radius={9999}
+                              fallbackStyle={{
+                                background: 'linear-gradient(135deg, #8b5cf6 0%, #6A5ACD 100%)',
+                                color: '#fff',
+                                fontSize: 12
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{m.name}</p>
+                              <div className="mt-1 h-1 w-16 rounded-full bg-slate-200">
+                                <div
+                                  className="h-full rounded-full bg-admin-accent"
+                                  style={{ width: `${barPct}%` }}
+                                />
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums font-medium">{m.appointments}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">
-                        {m.unique_clients}
-                        <span className="text-[10px] text-admin-textMuted ml-1">
-                          ({m.client_share_percent}%)
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-admin-textMuted">
-                        {m.commission_percent}%
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums font-medium">
-                        {formatPrice(m.gross_revenue)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums font-bold text-emerald-700">
-                        {formatPrice(m.master_share)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-violet-700">
-                        {formatPrice(m.salon_share)}
-                      </td>
-                      {is_current_month && (
-                        <td className="px-3 py-3 text-right tabular-nums text-emerald-600">
-                          {formatPrice(m.master_share_today)}
                         </td>
-                      )}
-                      <td className="px-3 py-3">
-                        {m.salon_master_id && (
-                          <button
-                            type="button"
-                            title="Excel за месяц"
-                            disabled={exporting}
-                            onClick={() => downloadExport(m.salon_master_id)}
-                            className="rounded-lg p-1.5 text-[#217346] hover:bg-green-50 transition disabled:opacity-50"
-                          >
-                            <Download className="h-4 w-4" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-admin-border bg-admin-bg/50 font-semibold">
-                  <td className="px-3 py-3">Итого</td>
-                  <td className="px-3 py-3 text-right tabular-nums">{summary.appointments}</td>
-                  <td className="px-3 py-3 text-right tabular-nums">{summary.unique_clients}</td>
-                  <td className="px-3 py-3" />
-                  <td className="px-3 py-3 text-right tabular-nums">{formatPrice(summary.revenue)}</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-emerald-700">
-                    {formatPrice(summary.masters_share)}
-                  </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-violet-700">
-                    {formatPrice(summary.salon_share)}
-                  </td>
-                  {is_current_month && (
-                    <td className="px-3 py-3 text-right tabular-nums text-emerald-600">
-                      {formatPrice(payouts.today?.masters_share || 0)}
-                    </td>
-                  )}
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{m.appointments}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{m.unique_clients}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-admin-textMuted">
+                          {m.commission_percent}%
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(m.gross_revenue)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-emerald-700">
+                          {formatPrice(m.master_share)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-violet-700">
+                          {formatPrice(m.salon_share)}
+                        </td>
+                        {is_current_month ? (
+                          <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600">
+                            {formatPrice(m.master_share_today)}
+                          </td>
+                        ) : null}
+                        <td className="px-3 py-2.5">
+                          {m.salon_master_id ? (
+                            <button
+                              type="button"
+                              disabled={exporting}
+                              onClick={() => downloadExport(m.salon_master_id)}
+                              className="rounded-lg p-1 text-[#217346] hover:bg-green-50 disabled:opacity-50"
+                            >
+                              <Download className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
-      </Card>
+      </SectionShell>
 
-      <Card>
-        <CardHeader
-          title="Записи по дням"
-          description="Фиолетовый — завершённые. Светлый — подтверждённые. Красный — отмены."
-        />
+      <SectionShell
+        title="Записи по дням"
+        description="Фиолетовый — завершённые · светлый — подтверждённые · красный — отмены"
+      >
         {!hasChartData ? (
-          <div className="py-10 text-center">
-            <p className="text-sm text-admin-textMuted">За этот месяц записей нет</p>
-          </div>
+          <p className="py-8 text-center text-sm text-admin-textMuted">За этот месяц записей нет</p>
         ) : (
-          <div>
-            <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-admin-textMuted">
+          <>
+            <div className="mb-3 flex flex-wrap gap-3 text-xs text-admin-textMuted">
               <span>
-                Всего: <span className="font-semibold text-admin-text">{chartTotal}</span>
+                Всего: <strong className="text-admin-text">{chartTotal}</strong>
               </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-gradient-to-t from-violet-600 to-admin-accent" />
-                Завершено: <span className="font-semibold text-admin-accent">{chartCompleted}</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-violet-200" />
-                Подтверждено: <span className="font-semibold text-violet-600">{chartActive - chartCompleted}</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-red-500" />
-                Отмены: <span className="font-semibold text-red-600">{chartNegative}</span>
-              </span>
+              <span>Завершено: <strong className="text-violet-700">{chartCompleted}</strong></span>
+              <span>Подтверждено: <strong className="text-violet-500">{chartActive - chartCompleted}</strong></span>
+              <span>Отмены: <strong className="text-red-600">{chartNegative}</strong></span>
             </div>
             <div
-              className="flex items-end gap-0.5 overflow-x-auto border-b border-admin-border/60 px-1 pb-2"
-              style={{ height: CHART_HEIGHT + 52 }}
+              className="flex items-end gap-0.5 overflow-x-auto border-b border-slate-100 px-1 pb-2"
+              style={{ height: CHART_HEIGHT + 48 }}
             >
               {daily.map((d) => {
                 const { total, completed, confirmed, negative } = dayBarHeights(d);
@@ -515,112 +527,86 @@ export default function AnalyticsSection({ api, toast }) {
                 return (
                   <div
                     key={d.date}
-                    className="flex w-7 shrink-0 flex-col items-center justify-end gap-1 sm:w-8"
-                    style={{ height: CHART_HEIGHT + 40 }}
+                    className="flex w-6 shrink-0 flex-col items-center justify-end gap-0.5 sm:w-7"
+                    style={{ height: CHART_HEIGHT + 36 }}
                     title={`${formatChartDay(d.date)}: ${count}`}
                   >
                     <span
-                      className={`text-[9px] font-bold tabular-nums leading-none ${
-                        count > 0 ? 'text-admin-text' : 'text-transparent'
-                      }`}
+                      className={`text-[8px] font-bold tabular-nums ${count > 0 ? 'text-admin-text' : 'text-transparent'}`}
                     >
                       {count || '·'}
                     </span>
                     <div
-                      className="flex w-full flex-col justify-end overflow-hidden rounded-t-md"
+                      className="flex w-full flex-col justify-end overflow-hidden rounded-t"
                       style={{ height: `${total}px` }}
                     >
-                      {negative > 0 && (
-                        <div
-                          className="w-full bg-gradient-to-t from-red-600 to-red-400"
-                          style={{ height: `${negative}px` }}
-                        />
-                      )}
-                      {confirmed > 0 && (
-                        <div
-                          className="w-full bg-gradient-to-t from-violet-300 to-violet-200"
-                          style={{ height: `${confirmed}px` }}
-                        />
-                      )}
-                      {completed > 0 && (
-                        <div
-                          className="w-full bg-gradient-to-t from-violet-600 to-admin-accent shadow-sm shadow-violet-200/40"
-                          style={{ height: `${completed}px` }}
-                        />
-                      )}
-                      {count <= 0 && <div className="h-full w-full bg-admin-border/80" />}
+                      {negative > 0 ? (
+                        <div className="w-full bg-red-400" style={{ height: `${negative}px` }} />
+                      ) : null}
+                      {confirmed > 0 ? (
+                        <div className="w-full bg-violet-200" style={{ height: `${confirmed}px` }} />
+                      ) : null}
+                      {completed > 0 ? (
+                        <div className="w-full bg-admin-accent" style={{ height: `${completed}px` }} />
+                      ) : null}
+                      {count <= 0 ? <div className="h-full w-full bg-slate-200" /> : null}
                     </div>
-                    <span className="text-[8px] tabular-nums text-admin-textMuted">
-                      {formatChartDay(d.date)}
-                    </span>
+                    <span className="text-[7px] tabular-nums text-admin-textMuted">{formatChartDay(d.date)}</span>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </>
         )}
-      </Card>
+      </SectionShell>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Топ услуг" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SectionShell title="Топ услуг">
           {top_services.length === 0 ? (
-            <p className="text-sm text-admin-textMuted py-4">Нет данных</p>
+            <p className="text-sm text-admin-textMuted">Нет данных</p>
           ) : (
-            <ul className="space-y-2">
-              {top_services.map((s) => (
+            <ol className="space-y-1.5">
+              {top_services.map((s, i) => (
                 <li
                   key={s.name}
-                  className="flex justify-between items-center rounded-xl px-3 py-2 bg-admin-bg border border-admin-border"
+                  className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200/60"
                 >
-                  <div>
-                    <p className="text-sm font-medium text-admin-text">{s.name}</p>
-                    <p className="text-xs text-admin-textMuted">{s.count} записей</p>
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-xs font-bold text-violet-700">
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-admin-text">{s.name}</p>
+                      <p className="text-xs text-admin-textMuted">{s.count} записей</p>
+                    </div>
                   </div>
-                  <p className="font-semibold text-admin-accent">{formatPrice(s.revenue)}</p>
+                  <p className="shrink-0 text-sm font-bold tabular-nums text-violet-700">{formatPrice(s.revenue)}</p>
                 </li>
               ))}
-            </ul>
+            </ol>
           )}
-        </Card>
+        </SectionShell>
 
-        <Card>
-          <CardHeader title="Как считается" description="Справка" />
-          <ul className="space-y-3 text-sm text-admin-textSecondary">
+        <SectionShell title="Как считается">
+          <ul className="space-y-2.5 text-sm text-admin-textSecondary">
             <li className="flex gap-2">
-              <Wallet className="h-4 w-4 shrink-0 text-admin-accent mt-0.5" />
-              <span>
-                <strong className="text-admin-text">Месяц</strong> — с 1-го по последнее число (МСК).
-                1-го числа счётчик обнуляется.
-              </span>
+              <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-admin-accent" />
+              <span>Месяц — с 1-го по последнее число (МСК). 1-го числа счётчик обнуляется.</span>
             </li>
             <li className="flex gap-2">
-              <PiggyBank className="h-4 w-4 shrink-0 text-violet-600 mt-0.5" />
-              <span>
-                <strong className="text-admin-text">К выплате</strong> — доля мастера по завершённым
-                записям месяца.
-              </span>
+              <PiggyBank className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
+              <span>К выплате — доля мастера по завершённым записям месяца.</span>
             </li>
             <li className="flex gap-2">
-              <TrendingUp className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
-              <span>
-                Прошлые месяцы сохраняются в базе — выгрузите Excel для архива и бухгалтерии.
-              </span>
+              <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <span>Прошлые месяцы сохраняются — выгрузите Excel для архива.</span>
             </li>
             <li className="flex gap-2">
-              <Users className="h-4 w-4 shrink-0 text-sky-600 mt-0.5" />
-              <span>
-                % мастера настраивается в разделе <strong className="text-admin-text">Мастера</strong>.
-              </span>
-            </li>
-            <li className="flex gap-2">
-              <CalendarCheck className="h-4 w-4 shrink-0 text-admin-textMuted mt-0.5" />
-              <span>
-                Зелёная кнопка — полный отчёт за выбранный месяц в Excel.
-              </span>
+              <Users className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+              <span>% мастера настраивается в разделе «Мастера».</span>
             </li>
           </ul>
-        </Card>
+        </SectionShell>
       </div>
     </div>
   );

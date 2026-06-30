@@ -160,6 +160,12 @@ export default function DashboardLayout({
     };
   }, [mobileMenuOpen]);
 
+  useEffect(() => {
+    const closeMenu = () => setMobileMenuOpen(false);
+    window.addEventListener('woner:close-mobile-menu', closeMenu);
+    return () => window.removeEventListener('woner:close-mobile-menu', closeMenu);
+  }, []);
+
   const TabItem = ({ id, label, Icon }) => {
     const isActive = activeSection === id;
     return (
@@ -281,15 +287,14 @@ export default function DashboardLayout({
           </div>
         )}
 
-        {/* Main content */}
+        {/* Main content + mobile tab bar (flex column — tab bar в потоке, не fixed) */}
         <div className="flex flex-1 flex-col min-h-0 dashboard-mobile-header-offset lg:pt-0">
           <main className="dashboard-mobile-main flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-5 lg:p-6 lg:pb-8">
             <div className="mx-auto w-full max-w-6xl">{children}</div>
           </main>
 
-          {/* Mobile bottom tab bar */}
-          <nav className="dashboard-mobile-tabbar lg:hidden fixed left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-admin-border shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
-            <div className="flex justify-around items-center min-h-[4rem] px-1 pb-0.5">
+          <nav className="dashboard-mobile-tabbar lg:hidden shrink-0 z-30 bg-white/95 backdrop-blur-md border-t border-admin-border shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
+            <div className="flex justify-around items-center min-h-[3.75rem] px-1">
               {isTeamMember ? (
                 <>
                   <TabItem id="overview" label="Главная" Icon={Home} />

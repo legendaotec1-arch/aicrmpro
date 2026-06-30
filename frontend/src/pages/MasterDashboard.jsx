@@ -1,6 +1,5 @@
 import { useState, useEffect, useContext, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
 import { AuthContext } from '../App';
 import { useToast } from '../context/ToastContext';
 import DashboardLayout from '../components/layout/DashboardLayout';
@@ -12,7 +11,7 @@ import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import { PageLoader } from '../components/ui/Spinner';
-import BookingLinkCard from '../components/dashboard/BookingLinkCard';
+import DashboardOverviewSection from '../components/dashboard/DashboardOverviewSection';
 import { DAYS, STATUS_LABELS, formatDate, formatDateTime, formatPrice, formatServicePrice } from '../lib/format';
 import { useSafeInterval } from '../lib/usePageVisible';
 import { useLeadingThrottle } from '../lib/useThrottledCallback';
@@ -36,8 +35,6 @@ import InstallPwaBanner, { showInstallPwaBanner } from '../components/pwa/Instal
 import VideoReelCard from '../components/dashboard/VideoReelCard';
 import ServicePriceModal from '../components/dashboard/ServicePriceModal';
 import { getServiceNameError } from '../lib/serviceName';
-import OverviewStatsCard from '../components/dashboard/OverviewStatsCard';
-import RecentClientsCard from '../components/dashboard/RecentClientsCard';
 import AppointmentsSection from '../components/dashboard/AppointmentsSection';
 import PortfolioSection from '../components/dashboard/PortfolioSection';
 import ManualBookModal from '../components/dashboard/ManualBookModal';
@@ -698,73 +695,20 @@ export default function MasterDashboard() {
         </div>
       ) : (
         <>
-      <InstallPwaBanner />
       {activeSection === 'overview' && (
-        <div className="space-y-6">
-          {clientBookingUrl && (
-            <BookingLinkCard
-              url={clientBookingUrl}
-              salonName={profile?.salon_name || profile?.name}
-              onCopied={(msg, tone) => toast(msg, tone || 'success')}
-              onQrError={(msg) => toast(msg, 'error')}
-            />
-          )}
-
-          <OverviewStatsCard api={api} isTeamMember={isTeamMember} />
-
-          <div className="grid gap-5 lg:grid-cols-2">
-          <Card className="overflow-hidden">
-            <CardHeader title="Записи на сегодня" action={<Button size="sm" variant="soft" onClick={() => setActiveSection('appointments')}>Все</Button>} />
-            {(() => {
-              const todayAppointments = appointments
-                .filter((a) => {
-                  const d = new Date(a.appointment_time);
-                  return d.toDateString() === new Date().toDateString() && a.status === 'confirmed';
-                })
-                .sort((a, b) => new Date(a.appointment_time) - new Date(b.appointment_time));
-
-              if (todayAppointments.length === 0) {
-                return <p className="text-sm text-admin-textMuted py-4 text-center">На сегодня записей нет</p>;
-              }
-
-              return (
-                <ul className="space-y-2">
-                  {todayAppointments.map((apt) => (
-                    <li key={apt.id}>
-                      <button
-                        type="button"
-                        onClick={() => openAppointmentDetail(apt)}
-                        className="flex w-full items-center gap-3 rounded-xl border border-admin-border/80 bg-gradient-to-r from-white to-violet-50/30 px-4 py-3 text-left transition hover:border-admin-accent/30 hover:bg-violet-50/50"
-                      >
-                        <div className="shrink-0 text-center">
-                          <p className="text-[11px] font-medium text-admin-textMuted">
-                            {new Date(apt.appointment_time).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
-                          </p>
-                          <p className="text-sm font-bold text-admin-accent">
-                            {new Date(apt.appointment_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                        <ClientAvatar client={appointmentClientForAvatar(apt)} size="xs" />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium text-admin-text truncate">{apt.client_name || 'Клиент'}</p>
-                          <p className="text-xs text-admin-textMuted truncate">{apt.service_name}</p>
-                        </div>
-                        <ChevronRight size={14} className="text-admin-textMuted shrink-0" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              );
-            })()}
-          </Card>
-
-          <RecentClientsCard
-            clients={clients}
-            onOpenClient={(c) => setSelectedClientId(c.id)}
-            onShowAll={() => setActiveSection('clients')}
-          />
-          </div>
-        </div>
+        <DashboardOverviewSection
+          profile={profile}
+          api={api}
+          isTeamMember={isTeamMember}
+          clientBookingUrl={clientBookingUrl}
+          appointments={appointments}
+          clients={clients}
+          onToast={toast}
+          onSectionChange={handleSectionChange}
+          onOpenAppointment={openAppointmentDetail}
+          onOpenClient={(c) => setSelectedClientId(c.id)}
+          appointmentClientForAvatar={appointmentClientForAvatar}
+        />
       )}
 
       {activeSection === 'analytics' && (

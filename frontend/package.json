@@ -15,6 +15,9 @@
   "dependencies": {
     "@sentry/react": "^10.61.0",
     "axios": "^1.6.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.42.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.16.0",
     "moment": "^2.29.4",
@@ -22,8 +25,11 @@
     "react": "^18.2.0",
     "react-calendar": "^4.6.1",
     "react-dom": "^18.2.0",
+    "react-flip-toolkit": "^7.2.4",
     "react-helmet-async": "^3.0.0",
-    "react-router-dom": "^6.20.1"
+    "react-router-dom": "^6.20.1",
+    "tailwind-merge": "^3.6.0",
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
@@ -31,6 +37,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "cypress": "^13.17.0",
+    "lightswind": "^3.1.37",
     "postcss": "^8.4.32",
     "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.3.6",

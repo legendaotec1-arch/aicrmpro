@@ -267,16 +267,19 @@ router.post('/metrics/sync', adminAuthMiddleware, async (req, res) => {
 
 router.post('/articles/sync', adminAuthMiddleware, async (req, res) => {
   try {
-    const { syncArticlePipeline } = require('../seo/articleCron');
+    const { syncArticlePipeline, reschedulePendingArticles } = require('../seo/articleCron');
     const { ensurePublicationSchedule } = require('../seo/publicationSchedule');
-    const result = await syncArticlePipeline(db);
+    const result = await syncArticlePipeline(db, { enrichAi: req.body?.enrichAi === true });
     if (req.body?.reschedule) {
       const client = await db.connect();
       try {
         await client.query('BEGIN');
-        const pub = await ensurePublicationSchedule(client, { force: true });
+        const pub = req.body.reschedule === 'all'
+          ? await ensurePublicationSchedule(client, { force: true })
+          : await reschedulePendingArticles(client);
         await client.query('COMMIT');
         result.rescheduled = pub.rescheduled;
+        result.articlesPerDay = pub.articlesPerDay;
       } catch (e) {
         await client.query('ROLLBACK');
         throw e;
@@ -287,8 +290,76 @@ router.post('/articles/sync', adminAuthMiddleware, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('SEO article sync:', err);
-    res.status(500).json({ error: 'Ошибка синхронизации статей' });
+    res.status(500).json({ error: err.message || 'Ошибка синхронизации статей' });
   }
+});
+
+router.get('/articles/stats', adminAuthMiddleware, async (_req, res) => {
+  try {
+    const { ARTICLES_PER_DAY } = require('../seo/publicationSchedule');
+    const { generateNicheArticles } = require('../seo/contentEngine');
+    const { countAiStats, BATCH_LIMIT } = require('../seo/articleAiEnricher');
+    const { isOpenRouterConfigured } = require('../seo/openRouter');
+    const stats = await db.query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE published_at <= NOW())::int AS live,
+        COUNT(*) FILTER (WHERE published_at > NOW())::int AS scheduled
+      FROM seo_articles WHERE published = TRUE
+    `);
+    const ai = await countAiStats(db);
+    const next = await db.query(
+      `SELECT slug, published_at, content_source, ai_model FROM seo_articles
+       WHERE published = TRUE AND published_at > NOW()
+       ORDER BY published_at ASC LIMIT 5`
+    );
+    res.json({
+      articlesPerDay: ARTICLES_PER_DAY,
+      catalogSize: generateNicheArticles().length,
+      aiBatchSize: BATCH_LIMIT,
+      openRouterConfigured: isOpenRouterConfigured(),
+      ...stats.rows[0],
+      ...ai,
+      nextPublications: next.rows,
+    });
+  } catch (err) {
+    console.error('SEO article stats:', err);
+    res.status(500).json({ error: err.message || 'Ошибка загрузки статистики блога' });
+  }
+});
+
+router.post('/articles/ai-generate', adminAuthMiddleware, async (req, res) => {
+  const { enrichUpcomingArticles, BATCH_LIMIT } = require('../seo/articleAiEnricher');
+  const limit = Math.min(Number(req.body?.limit) || BATCH_LIMIT, 20);
+
+  // Запускаем в фоне — без этого браузер закрывает соединение до того, как
+  // мы успеваем ответить, и фронт показывает «Ошибка AI-генерации».
+  const jobId = `ai-gen-${Date.now()}`;
+  res.json({
+    started: true,
+    jobId,
+    limit,
+    message: 'Запущено в фоне, обновите статистику через ~30 сек'
+  });
+
+  setImmediate(async () => {
+    const startedAt = Date.now();
+    console.log(`[seo-ai] job ${jobId} start limit=${limit}`);
+    try {
+      const result = await enrichUpcomingArticles(db, limit);
+      const statsRes = await db.query(`
+        SELECT COUNT(*) FILTER (WHERE content_source = 'ai')::int AS ai_total
+        FROM seo_articles WHERE published = TRUE
+      `);
+      console.log(
+        `[seo-ai] job ${jobId} done in ${Math.round((Date.now() - startedAt) / 1000)}s ` +
+        `enriched=${result.enriched} failed=${result.failed} ` +
+        `errors=${JSON.stringify((result.errors || []).slice(0, 3))}`
+      );
+    } catch (err) {
+      console.error(`[seo-ai] job ${jobId} crash:`, err);
+    }
+  });
 });
 
 router.get('/press', async (_req, res) => {

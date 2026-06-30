@@ -34,10 +34,13 @@ dashboardSuite('Мобильная версия Woner.ru — кабинет ма
         cy.contains('h2', 'Записи').should('be.visible');
       });
 
-      it('контент имеет нижний отступ под tab bar', () => {
+      it('нижняя навигация в потоке и не перекрывает контент', () => {
+        cy.get('.dashboard-mobile-tabbar').should('be.visible').then(($bar) => {
+          expect($bar.css('position'), 'position').not.to.eq('fixed');
+        });
         cy.get('.dashboard-mobile-main').then(($main) => {
           const paddingBottom = parseFloat($main.css('padding-bottom')) || 0;
-          expect(paddingBottom, 'padding-bottom').to.be.at.least(64);
+          expect(paddingBottom, 'padding-bottom').to.be.at.least(16);
         });
       });
 

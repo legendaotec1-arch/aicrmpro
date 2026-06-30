@@ -1,74 +1,67 @@
 import { useEffect, useState } from 'react';
-import { Calendar, CalendarCheck, Pencil, Phone, Plus, RefreshCw, ShieldOff, Trash2, Wallet, XCircle } from 'lucide-react';
+import {
+  Calendar,
+  CalendarCheck,
+  ChevronDown,
+  Pencil,
+  Plus,
+  ShieldOff,
+  Trash2,
+  Wallet,
+  X
+} from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import Input from '../ui/Input';
 import Textarea from '../ui/Textarea';
 import { PageLoader } from '../ui/Spinner';
-import MessengerLabel from '../brand/MessengerLabel';
 import ClientAvatar from './ClientAvatar';
+import { ClientDetailActionBar } from './ClientActionBar';
 import { STATUS_LABELS, formatDateTime, formatPrice } from '../../lib/format';
 import { formatRuPhoneDisplay, toTelHref } from '../../lib/phoneRu';
 
-function ClientStatsGrid({ stats }) {
+function HeroStats({ stats }) {
   const items = [
-    {
-      label: 'Визиты',
-      value: stats.total_visits,
-      icon: CalendarCheck,
-      iconWrap: 'bg-admin-accentSoft text-admin-accent'
-    },
-    {
-      label: 'Отмены',
-      value: stats.cancelled_visits,
-      icon: XCircle,
-      iconWrap: 'bg-amber-50 text-amber-600'
-    },
-    {
-      label: 'Ср. чек',
-      value: formatPrice(stats.average_check),
-      icon: Wallet,
-      iconWrap: 'bg-violet-50 text-violet-600'
-    },
-    {
-      label: 'Активные',
-      value: stats.upcoming_visits,
-      icon: Calendar,
-      iconWrap: 'bg-emerald-50 text-emerald-600'
-    }
+    { label: 'Визиты', value: stats.total_visits },
+    { label: 'Отмены', value: stats.cancelled_visits },
+    { label: 'Ср. чек', value: formatPrice(stats.average_check) },
+    { label: 'Активные', value: stats.upcoming_visits }
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {items.map(({ label, value, icon: Icon, iconWrap }) => (
+    <div className="mt-3 grid grid-cols-4 gap-1.5">
+      {items.map(({ label, value }) => (
         <div
           key={label}
-          className="flex items-center gap-2.5 rounded-xl border border-admin-border/70 bg-white px-3 py-2.5 shadow-sm"
+          className="rounded-xl bg-white/10 px-1.5 py-2 text-center ring-1 ring-white/15 backdrop-blur-sm"
         >
-          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconWrap}`}>
-            <Icon className="h-4 w-4" strokeWidth={2} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-lg font-bold leading-none tabular-nums text-admin-text">{value}</p>
-            <p className="mt-1 text-[11px] font-medium text-admin-textMuted">{label}</p>
-          </div>
+          <p className="text-sm font-bold tabular-nums leading-none">{value}</p>
+          <p className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-white/65">{label}</p>
         </div>
       ))}
     </div>
   );
 }
 
-function MessengerWriteButton({ channel, onClick }) {
+function SectionCard({ title, icon: Icon, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl border border-admin-border bg-white px-3 py-2 text-xs font-semibold text-admin-text shadow-sm transition hover:border-admin-accent/40 hover:bg-admin-hover active:scale-[0.98]"
-    >
-      <MessengerLabel channel={channel} showName={false} size="sm" />
-      <span>Написать</span>
-    </button>
+    <section className="overflow-hidden rounded-[1.1rem] bg-white ring-1 ring-slate-200/80">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left"
+      >
+        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-admin-textMuted">
+          {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+          {title}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-admin-textMuted transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? <div className="border-t border-slate-100 px-3.5 pb-3.5 pt-3">{children}</div> : null}
+    </section>
   );
 }
 
@@ -271,112 +264,69 @@ export default function ClientDetailModal({
 
   return (
     <>
-      <Modal open={!!clientId} onClose={onClose} size="md" bleed mobileFullScreen footer={null}>
+      <Modal open={!!clientId} onClose={onClose} size="md" bleed footer={null}>
         {loading ? (
-          <div className="py-12 flex justify-center">
+          <div className="flex justify-center py-14">
             <PageLoader />
           </div>
         ) : !data ? (
-          <p className="text-sm text-admin-textMuted py-10 text-center px-6">Данные недоступны</p>
+          <p className="px-6 py-12 text-center text-sm text-admin-textMuted">Данные недоступны</p>
         ) : (
-          <div className="px-4 py-4 sm:px-5 space-y-4">
-            {/* Header */}
-            <div className="flex items-center gap-3">
-              <ClientAvatar client={client} size="lg" className="ring-2 ring-admin-accent/20" />
-              <div className="min-w-0 flex-1">
-                <h2 className="text-base font-bold text-admin-text truncate leading-tight">{title}</h2>
-                {hasPhone && (
-                  <p className="mt-0.5 text-sm font-medium text-admin-textSecondary tabular-nums">{phoneDisplay}</p>
-                )}
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                  {hasTelegram && <Badge tone="telegram" />}
-                  {hasMax && <Badge tone="max" />}
-                  {isBlacklisted && <Badge tone="danger">ЧС</Badge>}
+          <>
+            <div className="relative overflow-hidden bg-gradient-to-br from-[#5B4FCF] via-[#6A5ACD] to-[#4338CA] px-4 pb-4 pt-3 text-white sm:px-5">
+              <div className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/10 blur-2xl" />
+              <div className="relative flex items-start gap-3">
+                <ClientAvatar client={client} size="lg" className="ring-2 ring-white/25 shadow-lg" />
+                <div className="min-w-0 flex-1 pt-0.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/65">Клиент</p>
+                  <h2 className="mt-0.5 truncate text-lg font-bold leading-tight">{title}</h2>
+                  {hasPhone ? (
+                    <p className="mt-1 text-sm tabular-nums text-white/80">{phoneDisplay}</p>
+                  ) : (
+                    <p className="mt-1 text-sm text-white/60">Без телефона</p>
+                  )}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {hasTelegram ? <Badge tone="telegram" className="!bg-white/15 !text-white !ring-white/20" /> : null}
+                    {hasMax ? <Badge tone="max" className="!bg-white/15 !text-white !ring-white/20" /> : null}
+                    {isBlacklisted ? <Badge tone="danger">ЧС</Badge> : null}
+                  </div>
                 </div>
-              </div>
-              {telHref && (
-                <a href={telHref} className="shrink-0">
-                  <button
-                    type="button"
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm shadow-emerald-200/50 transition hover:bg-emerald-600 active:scale-95"
-                    title="Позвонить"
-                  >
-                    <Phone className="h-4 w-4" />
-                  </button>
-                </a>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-wrap gap-2">
-              {hasTelegram && onMessage && (
-                <MessengerWriteButton channel="telegram" onClick={() => onMessage(client, 'telegram')} />
-              )}
-              {hasMax && onMessage && (
-                <MessengerWriteButton channel="max" onClick={() => onMessage(client, 'max')} />
-              )}
-              {onRepeatInvite && (
                 <button
                   type="button"
-                  onClick={() => setShowRepeatConfirm(true)}
-                  className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-xl border border-admin-border bg-white px-3 py-2 text-xs font-semibold text-admin-accent shadow-sm transition hover:bg-admin-accentSoft/50 active:scale-[0.98]"
+                  onClick={onClose}
+                  className="shrink-0 rounded-xl bg-white/10 p-2 text-white/90 ring-1 ring-white/15 transition hover:bg-white/20"
+                  aria-label="Закрыть"
                 >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Повторная запись
+                  <X className="h-4 w-4" />
                 </button>
-              )}
+              </div>
+              {stats ? <HeroStats stats={stats} /> : null}
             </div>
 
-            {/* Stats */}
-            {stats && <ClientStatsGrid stats={stats} />}
+            <ClientDetailActionBar
+              telHref={telHref}
+              hasTelegram={hasTelegram}
+              hasMax={hasMax}
+              onMessage={onMessage}
+              onRepeatInvite={onRepeatInvite ? () => setShowRepeatConfirm(true) : null}
+              client={client}
+            />
 
-            {/* Active appointments */}
-            {activeAppointments.length > 0 && (
-              <section>
-                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-admin-textMuted">Ближайшие</p>
-                <ul className="space-y-1">
-                  {activeAppointments.map((apt) => (
-                    <li
-                      key={apt.id}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-white border border-admin-border/80 px-2.5 py-1.5 text-xs"
+            <div className="space-y-3 bg-slate-50/50 px-3.5 py-3.5 sm:px-4">
+              <section className="rounded-[1.1rem] bg-amber-50/90 px-3.5 py-3 ring-1 ring-amber-200/80">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800/80">Заметка</p>
+                  {!noteEditing && savedNote.trim() ? (
+                    <button
+                      type="button"
+                      onClick={startEditNote}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-900/70 hover:text-amber-900"
                     >
-                      <span className="min-w-0 truncate font-medium text-admin-text">{apt.service_name}</span>
-                      <span className="shrink-0 text-admin-textMuted">{formatDateTime(apt.appointment_time)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {/* Profile + note */}
-            <section className="rounded-xl border border-admin-border/80 bg-white p-2.5 space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  label="Фамилия"
-                  value={form.last_name}
-                  onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                  placeholder="Рупасов"
-                />
-                <Input
-                  label="Имя"
-                  value={form.first_name}
-                  onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                  placeholder="Евгений"
-                />
-              </div>
-              <Input
-                label="Телефон"
-                type="tel"
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="+7 ..."
-              />
-              <Button size="sm" className="w-full sm:w-auto" onClick={handleSaveProfile} loading={savingProfile}>
-                Сохранить
-              </Button>
-
-              <div className="border-t border-admin-border/60 pt-2">
-                <p className="mb-1.5 text-xs font-semibold text-admin-text">Заметка о клиенте:</p>
+                      <Pencil className="h-3 w-3" />
+                      Изменить
+                    </button>
+                  ) : null}
+                </div>
                 {noteEditing ? (
                   <div className="space-y-2">
                     <textarea
@@ -385,7 +335,7 @@ export default function ClientDetailModal({
                       rows={2}
                       autoFocus
                       placeholder="Например: любит капучино"
-                      className="input-field min-h-[56px] resize-y text-sm py-2"
+                      className="input-field min-h-[52px] resize-y bg-white py-2 text-sm"
                     />
                     <div className="flex gap-2">
                       <Button size="sm" onClick={handleSaveNote} loading={savingNote}>
@@ -397,87 +347,116 @@ export default function ClientDetailModal({
                     </div>
                   </div>
                 ) : savedNote.trim() ? (
-                  <div className="flex items-start gap-2">
-                    <p className="min-w-0 flex-1 text-sm text-admin-text leading-snug whitespace-pre-wrap">{savedNote}</p>
-                    <button
-                      type="button"
-                      onClick={startEditNote}
-                      className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-admin-accent hover:text-admin-accentHover"
-                    >
-                      <Pencil className="h-3 w-3" />
-                      Редактировать
-                    </button>
-                  </div>
+                  <p className="text-sm leading-snug text-amber-950 whitespace-pre-wrap">{savedNote}</p>
                 ) : (
                   <button
                     type="button"
                     onClick={startAddNote}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-admin-accent hover:text-admin-accentHover"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900/80 hover:text-amber-900"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     Добавить заметку
                   </button>
                 )}
-              </div>
-            </section>
+              </section>
 
-            {/* Visit history */}
-            <section>
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-admin-textMuted flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
-                Последние визиты
-              </p>
-              {appointments.length === 0 ? (
-                <p className="text-xs text-admin-textMuted text-center py-3 rounded-lg border border-dashed border-admin-border">
-                  Записей пока нет
-                </p>
-              ) : (
-                <ul className="rounded-xl border border-admin-border/80 overflow-hidden divide-y divide-admin-border/60">
-                  {appointments.map((apt) => {
-                    const st = STATUS_LABELS[apt.status] || STATUS_LABELS.confirmed;
-                    return (
-                      <li key={apt.id} className="flex items-center justify-between gap-2 bg-white px-2.5 py-2 text-xs">
-                        <div className="min-w-0">
-                          <p className="font-medium text-admin-text truncate">{apt.service_name}</p>
-                          <p className="text-admin-textMuted">{formatDateTime(apt.appointment_time)}</p>
-                        </div>
-                        <Badge tone={st.tone}>{st.label}</Badge>
+              {activeAppointments.length > 0 ? (
+                <section className="rounded-[1.1rem] bg-white px-3.5 py-3 ring-1 ring-emerald-200/70">
+                  <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                    <CalendarCheck className="h-3.5 w-3.5" />
+                    Ближайшие записи
+                  </p>
+                  <ul className="space-y-1.5">
+                    {activeAppointments.map((apt) => (
+                      <li
+                        key={apt.id}
+                        className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50/80 px-2.5 py-2 text-xs"
+                      >
+                        <span className="min-w-0 truncate font-medium text-admin-text">{apt.service_name}</span>
+                        <span className="shrink-0 tabular-nums text-emerald-800/70">{formatDateTime(apt.appointment_time)}</span>
                       </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
 
-            {/* Footer actions */}
-            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-admin-border/60">
-              {!isBlacklisted && (
+              <SectionCard title="Данные клиента" icon={Wallet} defaultOpen={false}>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      label="Фамилия"
+                      value={form.last_name}
+                      onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                      placeholder="Рупасов"
+                    />
+                    <Input
+                      label="Имя"
+                      value={form.first_name}
+                      onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                      placeholder="Евгений"
+                    />
+                  </div>
+                  <Input
+                    label="Телефон"
+                    type="tel"
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    placeholder="+7 ..."
+                  />
+                  <Button size="sm" className="w-full sm:w-auto" onClick={handleSaveProfile} loading={savingProfile}>
+                    Сохранить
+                  </Button>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="История визитов" icon={Calendar} defaultOpen={appointments.length > 0}>
+                {appointments.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-200 py-4 text-center text-xs text-admin-textMuted">
+                    Записей пока нет
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {appointments.map((apt) => {
+                      const st = STATUS_LABELS[apt.status] || STATUS_LABELS.confirmed;
+                      return (
+                        <li
+                          key={apt.id}
+                          className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-2.5 py-2 text-xs ring-1 ring-slate-200/60"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-admin-text">{apt.service_name}</p>
+                            <p className="text-admin-textMuted">{formatDateTime(apt.appointment_time)}</p>
+                          </div>
+                          <Badge tone={st.tone}>{st.label}</Badge>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </SectionCard>
+
+              <div className="flex flex-wrap items-center gap-3 border-t border-slate-200/80 pt-2">
+                {!isBlacklisted ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowBlacklistConfirm(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 hover:text-red-700"
+                  >
+                    <ShieldOff className="h-3.5 w-3.5" />
+                    В чёрный список
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => setShowBlacklistConfirm(true)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-700 px-1 py-1"
+                  onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); }}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 hover:text-red-700"
                 >
-                  <ShieldOff className="h-3.5 w-3.5" />
-                  В чёрный список
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Удалить
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); }}
-                className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-700 px-1 py-1"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Удалить
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="ml-auto text-xs font-medium text-admin-textMuted hover:text-admin-text px-2 py-1"
-              >
-                Закрыть
-              </button>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </Modal>
 
@@ -552,7 +531,7 @@ export default function ClientDetailModal({
           </>
         }
       >
-        <p className="text-sm text-admin-textSecondary mb-3">
+        <p className="mb-3 text-sm text-admin-textSecondary">
           Для подтверждения введите слово <strong>УДАЛИТЬ</strong>
         </p>
         <Input

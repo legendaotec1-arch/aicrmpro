@@ -66,7 +66,7 @@ export default function AppointmentDetailModal({
   const clientForAvatar = appointmentClientForAvatar(apt);
 
   return (
-    <Modal open={open} onClose={onClose} size="sm" bleed mobileFullScreen footer={null}>
+    <Modal open={open} onClose={onClose} size="sm" bleed footer={null}>
       <div className="w-full min-w-0">
         <div className="px-4 pt-4 pb-3 sm:px-5">
           <div className="flex items-start justify-between gap-3">

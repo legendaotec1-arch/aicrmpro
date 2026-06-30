@@ -1,7 +1,24 @@
 const fs = require('fs');
 
+/** Дефолтные JSON-LD из index.html — только для главной без SSR-инъекции */
+const DEFAULT_JSON_LD_TYPES = ['WebSite', 'Organization', 'LocalBusiness', 'FAQPage'];
+
+function removeDefaultJsonLd(html) {
+  return html.replace(
+    /<script\s+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi,
+    (match) => {
+      const isDefault = DEFAULT_JSON_LD_TYPES.some((type) => (
+        match.includes(`"@type": "${type}"`)
+        || match.includes(`"@type":"${type}"`)
+        || match.includes(`"@type": "${type}",`)
+      ));
+      return isDefault ? '' : match;
+    }
+  );
+}
+
 function injectSeoIntoHtml(html, { title, description, canonical, robots, jsonLdBlocks, ogImage }) {
-  let out = html;
+  let out = removeDefaultJsonLd(html);
 
   const safeTitle = escapeHtml(title || 'Woner.ru');
   const safeDesc = escapeHtml(description || '');
@@ -59,4 +76,4 @@ function readIndexHtml(indexPath) {
   return fs.readFileSync(indexPath, 'utf8');
 }
 
-module.exports = { injectSeoIntoHtml, readIndexHtml };
+module.exports = { injectSeoIntoHtml, readIndexHtml, removeDefaultJsonLd };

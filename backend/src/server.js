@@ -28,6 +28,7 @@ if (process.env.NODE_ENV === 'production') {
 
 const { createCorsOriginChecker } = require('./utils/corsOrigins');
 const { requestLogMiddleware } = require('./middleware/requestLog');
+const { securityMiddleware } = require('./middleware/security');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,6 +58,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(securityMiddleware);
 app.use(requestLogMiddleware);
 
 // Static files for uploads; missing files → 404 (не index.html SPA)

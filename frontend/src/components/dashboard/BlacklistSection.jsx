@@ -9,6 +9,7 @@ export default function BlacklistSection({
   api,
   toast,
   embedded = false,
+  cardLayout = false,
   onLoaded,
   showAddModal,
   onShowAddModalChange
@@ -140,29 +141,37 @@ export default function BlacklistSection({
         description="Заблокированные клиенты не смогут записаться онлайн"
       />
     ) : (
-      <ul className="divide-y divide-admin-border/80">
+      <ul className={cardLayout ? 'space-y-3' : 'divide-y divide-admin-border/80'}>
         {list.map((item) => (
           <li key={item.id}>
-            <div className="flex items-center gap-3 px-3 py-3 sm:px-4 hover:bg-red-50/30 transition">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-100 bg-red-50">
-                <UserX size={16} className="text-red-500" />
+            <div
+              className={
+                cardLayout
+                  ? 'overflow-hidden rounded-[1.2rem] bg-white shadow-[0_6px_24px_rgba(15,23,42,0.05)] ring-1 ring-red-100'
+                  : 'flex items-center gap-3 px-3 py-3 sm:px-4 hover:bg-red-50/30 transition'
+              }
+            >
+              <div className={cardLayout ? 'flex items-start gap-3 p-3.5 sm:p-4' : 'flex w-full items-center gap-3'}>
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-500 ring-1 ring-red-100">
+                  <UserX size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-admin-text">{item.name || 'Без имени'}</p>
+                  <p className="mt-0.5 truncate text-sm tabular-nums text-admin-textSecondary">
+                    {item.phone || item.client_phone || '—'}
+                  </p>
+                  <p className="mt-2 rounded-lg bg-red-50 px-2 py-1 text-xs text-red-700">«{item.reason}»</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemove(item.id)}
+                  disabled={deletingId === item.id}
+                  className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                  title="Убрать из списка"
+                >
+                  <Trash2 size={16} className="mx-auto" />
+                </button>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-admin-text">{item.name || 'Без имени'}</p>
-                <p className="truncate text-xs tabular-nums text-admin-textSecondary">
-                  {item.phone || item.client_phone || '—'}
-                </p>
-                <p className="mt-0.5 truncate text-xs italic text-red-600">«{item.reason}»</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleRemove(item.id)}
-                disabled={deletingId === item.id}
-                className="shrink-0 rounded-lg p-2 text-admin-textMuted transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                title="Убрать из списка"
-              >
-                <Trash2 size={16} />
-              </button>
             </div>
           </li>
         ))}
