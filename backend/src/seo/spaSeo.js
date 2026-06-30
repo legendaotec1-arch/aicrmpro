@@ -5,6 +5,74 @@ const { injectSeoIntoHtml, readIndexHtml } = require('../seo/htmlInject');
 const { buildPageJsonLd, buildArticleJsonLd, buildMasterJsonLd } = require('../seo/jsonld');
 const { SITE_URL, NOINDEX_PREFIXES, NOINDEX_EXACT } = require('../seo/config');
 
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildSsrBody({ kind, page, article }) {
+  // SSR-fallback: отдаём поисковикам весь видимый контент страницы без JS.
+  // После гидратации React перезапишет разметку #root — это OK для пользователей.
+  if (kind === 'page' && page) {
+    const sectionsHtml = (page.sections || [])
+      .map((s) => `
+        <section>
+          <h2>${escapeHtml(s.h2)}</h2>
+          <p>${escapeHtml(s.body)}</p>
+          ${s.bullets?.length ? `<ul>${s.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}
+        </section>`)
+      .join('');
+    const faqHtml = (page.faq || [])
+      .map((q, i) => `
+        <details ${i === 0 ? 'open' : ''}>
+          <summary>${escapeHtml(q.q)}</summary>
+          <p>${escapeHtml(q.a)}</p>
+        </details>`)
+      .join('');
+    const relatedHtml = page.related_slugs?.length
+      ? `<nav aria-label="Связанные страницы"><ul>${page.related_slugs.map((s) => `<li><a href="/${escapeHtml(s)}">${escapeHtml(s)}</a></li>`).join('')}</ul></nav>`
+      : '';
+    return `
+      <article itemscope itemtype="https://schema.org/Article">
+        <h1 itemprop="headline">${escapeHtml(page.h1)}</h1>
+        <p itemprop="description">${escapeHtml(page.intro)}</p>
+        ${sectionsHtml}
+        ${faqHtml ? `<section>${faqHtml}</section>` : ''}
+        ${relatedHtml}
+      </article>
+    `;
+  }
+  if (kind === 'article' && article) {
+    const sectionsHtml = (article.sections || [])
+      .map((s) => `
+        <section>
+          <h2>${escapeHtml(s.h2)}</h2>
+          <p>${escapeHtml(s.body)}</p>
+          ${s.bullets?.length ? `<ul>${s.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}
+        </section>`)
+      .join('');
+    const faqHtml = (article.faq || [])
+      .map((q, i) => `
+        <details ${i === 0 ? 'open' : ''}>
+          <summary>${escapeHtml(q.q)}</summary>
+          <p>${escapeHtml(q.a)}</p>
+        </details>`)
+      .join('');
+    return `
+      <article itemscope itemtype="https://schema.org/Article">
+        <h1 itemprop="headline">${escapeHtml(article.h1)}</h1>
+        <p itemprop="description">${escapeHtml(article.intro)}</p>
+        ${sectionsHtml}
+        ${faqHtml ? `<section>${faqHtml}</section>` : ''}
+      </article>
+    `;
+  }
+  return null;
+}
+
 /** Старые slug → канонический (301) */
 const SLUG_REDIRECTS = {
   'online-zapis-dlya-mastera-manikyura': 'online-zapis-dlya-manikyura',
@@ -84,6 +152,7 @@ async function resolveSeoForPath(pathname) {
       canonical: `${SITE_URL}${clean}`,
       robots: 'index, follow',
       jsonLdBlocks: buildArticleJsonLd(article, breadcrumbs),
+      ssr: { html: buildSsrBody({ kind: 'article', article }) },
     };
   }
 
@@ -200,6 +269,7 @@ async function resolveSeoForPath(pathname) {
     canonical,
     robots: isCanonicalAlias ? 'noindex, follow' : 'index, follow',
     jsonLdBlocks: buildPageJsonLd(page, breadcrumbs),
+    ssr: { html: buildSsrBody({ kind: 'page', page }) },
   };
 }
 

@@ -17,7 +17,7 @@ function removeDefaultJsonLd(html) {
   );
 }
 
-function injectSeoIntoHtml(html, { title, description, canonical, robots, jsonLdBlocks, ogImage }) {
+function injectSeoIntoHtml(html, { title, description, canonical, robots, jsonLdBlocks, ogImage, ssr }) {
   let out = removeDefaultJsonLd(html);
 
   const safeTitle = escapeHtml(title || 'Woner.ru');
@@ -45,6 +45,16 @@ function injectSeoIntoHtml(html, { title, description, canonical, robots, jsonLd
       .map((block) => `<script type="application/ld+json">\n${JSON.stringify(block)}\n</script>`)
       .join('\n    ');
     out = out.replace('</head>', `    ${scripts}\n  </head>`);
+  }
+
+  if (ssr?.html) {
+    // SSR fallback для поисковиков: реальный H1, intro, sections и FAQ рендерятся
+    // прямо в #root до того, как React успеет гидратироваться.
+    // React при гидратации заменит содержимое — но для ботов этого достаточно.
+    out = out.replace(
+      /(<div\s+id=["']root["'][^>]*>)([\s\S]*?)(<\/div>\s*(?:<!--\s*react-mount-point\s*-->)?)/i,
+      (match, open, _inner, close) => `${open}\n${ssr.html}\n${close}`
+    );
   }
 
   return out;

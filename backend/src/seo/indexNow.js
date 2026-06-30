@@ -129,13 +129,20 @@ async function getRecentlyUpdatedPageUrls(dbConn, hours = 24) {
 
 async function getSitemapUrlsForIndexNow(dbConn) {
   const { collectSitemapUrls } = require('./sitemap');
-  const { staticUrls, pageUrls, articleUrls, masterUrls } = await collectSitemapUrls(dbConn);
+  const { staticUrls, pageUrls, geoUrls, articleUrls, masterUrls } = await collectSitemapUrls(dbConn);
   return [
     ...staticUrls.map((u) => u.loc),
     ...pageUrls.map((u) => u.loc),
+    ...geoUrls.map((u) => u.loc),
     ...articleUrls.map((u) => u.loc),
     ...masterUrls.map((u) => u.loc),
   ];
+}
+
+async function getGeoUrlsForIndexNow(dbConn) {
+  const { collectSitemapUrls } = require('./sitemap');
+  const { geoUrls } = await collectSitemapUrls(dbConn);
+  return geoUrls.map((u) => u.loc);
 }
 
 function registerIndexNowKeyRoute(app) {
@@ -176,6 +183,7 @@ module.exports = {
   getRecentlyPublishedArticleUrls,
   getRecentlyUpdatedPageUrls,
   getSitemapUrlsForIndexNow,
+  getGeoUrlsForIndexNow,
   registerIndexNowKeyRoute,
   generateIndexNowKey,
 };
