@@ -132,13 +132,6 @@ const NICHE_CATALOG = [
   niche('sportzal', 'sportivnogo-zala', 'спортивного зала', { category: 'fitness' }),
   niche('basseyn', 'bassejna', 'бассейна', { category: 'fitness' }),
 
-  niche('avtoservis', 'avtoservisa', 'автосервиса', {
-    category: 'auto',
-    bookingNa: { slug: 'remont-avto', label: 'ремонт авто' },
-  }),
-  niche('avtomoyka', 'avtomoiki', 'автомойки', { category: 'auto' }),
-  niche('shinomontazh', 'shinomontazha', 'шиномонтажа', { category: 'auto' }),
-
   niche('fotograf', 'fotografa', 'фотографа', {
     category: 'services',
     bookingNa: { slug: 'fotosessiyu', label: 'фотосессию' },
@@ -152,7 +145,6 @@ const NICHE_CATALOG = [
   niche('koach', 'koacha', 'коуча', { category: 'services' }),
   niche('konsultant', 'konsultanta', 'консультанта', { category: 'services' }),
   niche('event', 'event-agentstva', 'event-агентства', { category: 'services' }),
-  niche('arenda-avto', 'arendy-avto', 'аренды авто', { category: 'services' }),
   niche('gruming', 'gruming-salona', 'груминг-салона', { category: 'services' }),
 ];
 
