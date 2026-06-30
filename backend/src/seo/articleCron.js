@@ -114,10 +114,14 @@ async function syncArticlePipeline(dbConn = db, { enrichAi = true } = {}) {
   }
 
   let aiEnrichment = { enriched: 0, failed: 0, skipped: true };
+  let pagesAiEnrichment = { enriched: 0, failed: 0, skipped: true };
   if (enrichAi) {
     try {
-      const { enrichUpcomingArticles } = require('./articleAiEnricher');
+      const { enrichUpcomingArticles, enrichUpcomingPages } = require('./articleAiEnricher');
       aiEnrichment = await enrichUpcomingArticles(dbConn);
+      // Докручиваем geo-страницы: 50 штук за один утренний прогон,
+      // 2245 / 50 ≈ 45 прогонов = ~3 недели при ежедневном cron.
+      pagesAiEnrichment = await enrichUpcomingPages(dbConn, 50, { geoOnly: true });
     } catch (err) {
       console.warn('[seo-cron] AI enrichment:', err.message);
       aiEnrichment = { enriched: 0, failed: 0, skipped: false, errors: [err.message] };
@@ -151,6 +155,7 @@ async function syncArticlePipeline(dbConn = db, { enrichAi = true } = {}) {
       added: newArticles.length,
       articlesPerDay: ARTICLES_PER_DAY,
       aiEnrichment,
+      pagesAiEnrichment,
       ...stats.rows[0],
     };
   } catch (err) {

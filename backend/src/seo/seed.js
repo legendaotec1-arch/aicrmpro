@@ -4,6 +4,10 @@ const { ensurePublicationSchedule } = require('./publicationSchedule');
 const { syncArticlePipeline } = require('./articleCron');
 
 async function upsertPage(client, page) {
+  // При обновлении сохраняем AI-обогащённый контент: если страница уже
+  // content_source = 'ai', не перезаписываем title/h1/intro/sections/faq/toc.
+  // Обновляем только служебные поля (priority, related_slugs, extras, и т.д.),
+  // чтобы шаблонный seed не затёр результат AI-энайчмента.
   await client.query(
     `INSERT INTO seo_pages (
        slug, page_type, cluster, niche, title, meta_description, h1, intro,
@@ -13,16 +17,16 @@ async function upsertPage(client, page) {
        page_type = EXCLUDED.page_type,
        cluster = EXCLUDED.cluster,
        niche = EXCLUDED.niche,
-       title = EXCLUDED.title,
-       meta_description = EXCLUDED.meta_description,
-       h1 = EXCLUDED.h1,
-       intro = EXCLUDED.intro,
-       sections = EXCLUDED.sections,
-       faq = EXCLUDED.faq,
+       title = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.title ELSE EXCLUDED.title END,
+       meta_description = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.meta_description ELSE EXCLUDED.meta_description END,
+       h1 = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.h1 ELSE EXCLUDED.h1 END,
+       intro = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.intro ELSE EXCLUDED.intro END,
+       sections = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.sections ELSE EXCLUDED.sections END,
+       faq = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.faq ELSE EXCLUDED.faq END,
+       toc = CASE WHEN seo_pages.content_source = 'ai' THEN seo_pages.toc ELSE EXCLUDED.toc END,
        related_slugs = EXCLUDED.related_slugs,
        priority = EXCLUDED.priority,
        published = EXCLUDED.published,
-       toc = EXCLUDED.toc,
        extras = EXCLUDED.extras,
        updated_at = NOW()`,
     [
