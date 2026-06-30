@@ -206,10 +206,11 @@ app.get('/sitemap.xml', async (_req, res) => {
 async function sendSitemapPart(req, res, part) {
   try {
     const db = require('./config/database');
-    const { staticUrls, pageUrls, articleUrls, masterUrls } = await collectSitemapUrls(db);
+    const { staticUrls, pageUrls, geoUrls, articleUrls, masterUrls } = await collectSitemapUrls(db);
     const map = {
       static: staticUrls,
       pages: pageUrls,
+      geo: geoUrls,
       blog: articleUrls,
       masters: masterUrls,
     };
@@ -222,6 +223,7 @@ async function sendSitemapPart(req, res, part) {
 
 app.get('/sitemap-static.xml', (req, res) => sendSitemapPart(req, res, 'static'));
 app.get('/sitemap-pages.xml', (req, res) => sendSitemapPart(req, res, 'pages'));
+app.get('/sitemap-geo.xml', (req, res) => sendSitemapPart(req, res, 'geo'));
 app.get('/sitemap-blog.xml', (req, res) => sendSitemapPart(req, res, 'blog'));
 app.get('/sitemap-masters.xml', (req, res) => sendSitemapPart(req, res, 'masters'));
 

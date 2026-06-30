@@ -117,18 +117,45 @@ function generateNicheArticles() {
   return articles;
 }
 
+function parseGeoSlug(slug) {
+  // online-zapis-{nicheBase}-{citySlug}
+  const m = /^online-zapis-([a-z0-9-]+)-([a-z0-9-]+)$/i.exec(slug);
+  if (!m) return null;
+  return { nicheBase: m[1], citySlug: m[2] };
+}
+
 function assignSmartRelatedLinks(pages) {
   const byNiche = {};
   const byCluster = {};
+  const byCity = {};
+  const geoByCityNiche = {};
+  const geoByCity = {};
 
-  pages.forEach((p) => {
+  for (const p of pages) {
     if (p.niche) {
       if (!byNiche[p.niche]) byNiche[p.niche] = [];
       byNiche[p.niche].push(p.slug);
     }
     if (!byCluster[p.cluster]) byCluster[p.cluster] = [];
     byCluster[p.cluster].push(p.slug);
-  });
+
+    const city = p.extras?.city;
+    if (city) {
+      if (!byCity[city]) byCity[city] = [];
+      byCity[city].push(p.slug);
+    }
+
+    const geo = parseGeoSlug(p.slug);
+    if (geo) {
+      geo.citySlug = geo.citySlug;
+      const cityId = p.extras?.city || geo.citySlug;
+      if (!geoByCity[cityId]) geoByCity[cityId] = [];
+      geoByCity[cityId].push({ slug: p.slug, nicheBase: geo.nicheBase, niche: p.niche });
+      const key = `${cityId}::${p.niche}`;
+      if (!geoByCityNiche[key]) geoByCityNiche[key] = [];
+      geoByCityNiche[key].push(p.slug);
+    }
+  }
 
   const hubByCluster = {
     crm: 'crm-dlya-klientov',
@@ -140,8 +167,22 @@ function assignSmartRelatedLinks(pages) {
     const hub = hubByCluster[p.cluster];
     const nicheSiblings = (p.niche ? byNiche[p.niche] : []).filter((s) => s !== p.slug);
     const clusterSiblings = (byCluster[p.cluster] || []).filter((s) => s !== p.slug);
-    const related = [hub, ...nicheSiblings.slice(0, 3), ...clusterSiblings.slice(0, 2)]
-      .filter(Boolean);
+
+    const related = [hub, ...nicheSiblings.slice(0, 3), ...clusterSiblings.slice(0, 2)].filter(Boolean);
+
+    // Для geo-страниц добавляем соседей по городу и нише в городе
+    const geo = parseGeoSlug(p.slug);
+    if (geo && p.extras?.city) {
+      const cityId = p.extras.city;
+      const cityNeighbors = (byCity[cityId] || []).filter((s) => s !== p.slug);
+      const nicheInCity = (geoByCityNiche[`${cityId}::${p.niche}`] || []).filter((s) => s !== p.slug);
+      related.push(...cityNeighbors.slice(0, 4));
+      related.push(...nicheInCity.slice(0, 2));
+    } else if (p.extras?.city) {
+      const cityNeighbors = (byCity[p.extras.city] || []).filter((s) => s !== p.slug);
+      related.push(...cityNeighbors.slice(0, 4));
+    }
+
     return { ...p, related_slugs: [...new Set(related)].slice(0, 8) };
   });
 }

@@ -57,14 +57,26 @@ async function collectSitemapUrls(db) {
   }));
 
   const pagesRes = await db.query(
-    `SELECT slug, updated_at, priority FROM seo_pages WHERE published = TRUE ORDER BY priority DESC`
+    `SELECT slug, updated_at, priority, extras FROM seo_pages WHERE published = TRUE ORDER BY priority DESC`
   );
-  const pageUrls = pagesRes.rows.map((row) => ({
-    loc: `${SITE_URL}/${row.slug}`,
-    changefreq: 'weekly',
-    priority: Number(row.priority) || 0.6,
-    lastmod: row.updated_at ? new Date(row.updated_at).toISOString().slice(0, 10) : today,
-  }));
+
+  const pageUrls = [];
+  const geoUrls = [];
+  for (const row of pagesRes.rows) {
+    const basePriority = Number(row.priority) || 0.6;
+    const isGeo = row.extras && row.extras.geoGenerated === true;
+    const item = {
+      loc: `${SITE_URL}/${row.slug}`,
+      changefreq: isGeo ? 'weekly' : 'weekly',
+      priority: isGeo ? Math.min(basePriority, 0.55) : basePriority,
+      lastmod: row.updated_at ? new Date(row.updated_at).toISOString().slice(0, 10) : today,
+    };
+    if (isGeo) {
+      geoUrls.push(item);
+    } else {
+      pageUrls.push(item);
+    }
+  }
 
   const articlesRes = await db.query(
     `SELECT slug, updated_at, published_at FROM seo_articles
@@ -103,13 +115,14 @@ async function collectSitemapUrls(db) {
     /* ignore */
   }
 
-  return { staticUrls, pageUrls, articleUrls, masterUrls };
+  return { staticUrls, pageUrls, geoUrls, articleUrls, masterUrls };
 }
 
 async function buildSitemapIndexXml(db) {
   return buildSitemapIndex([
     { loc: `${SITE_URL}/sitemap-static.xml` },
     { loc: `${SITE_URL}/sitemap-pages.xml` },
+    { loc: `${SITE_URL}/sitemap-geo.xml` },
     { loc: `${SITE_URL}/sitemap-blog.xml` },
     { loc: `${SITE_URL}/sitemap-masters.xml` },
   ]);

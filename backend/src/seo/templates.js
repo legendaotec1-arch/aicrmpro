@@ -80,10 +80,18 @@ function buildPage({
   priority,
   variant,
   category,
+  city,
 }) {
   const h1 = h1Override || titleOverride || slug;
   const title = titleOverride ? `${titleOverride} | ${SITE_NAME}` : `${h1} | ${SITE_NAME}`;
-  const contentCtx = { h1, genitive: nicheLabel, category: category || 'services', pageType, variant };
+  const contentCtx = {
+    h1,
+    genitive: nicheLabel,
+    category: category || 'services',
+    pageType,
+    variant,
+    city: city || null,
+  };
 
   return {
     slug,
@@ -99,6 +107,9 @@ function buildPage({
     related_slugs: [],
     priority: priority ?? 0.6,
     published: true,
+    extras: city
+      ? { city: city.id, cityName: city.name, geoGenerated: true }
+      : {},
   };
 }
 

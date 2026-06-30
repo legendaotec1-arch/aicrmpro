@@ -6,6 +6,7 @@ const {
   generateNicheArticles,
   assignSmartRelatedLinks,
 } = require('./contentEngine');
+const { generateGeoPages } = require('./geoMatrix');
 
 const CORE_PAGES = [
   { slug: 'crm-dlya-klientov', cluster: 'crm', pageType: 'solution', h1: 'CRM для клиентов', priority: 0.95 },
@@ -38,6 +39,7 @@ function generateAllPages() {
   const pages = [];
 
   function add(page) {
+    if (!page) return;
     if (seen.has(page.slug)) return;
     seen.add(page.slug);
     pages.push(page);
@@ -64,6 +66,8 @@ function generateAllPages() {
     const page = buildComparePage(p.slug);
     if (page) add(page);
   });
+
+  generateGeoPages().forEach(add);
 
   return assignSmartRelatedLinks(pages);
 }

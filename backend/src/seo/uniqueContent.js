@@ -69,6 +69,10 @@ const INTRO_TEMPLATES = [
   'С {site} тема «{h1Lower}» решается комплексно: календарь, прайс, портфолио, история визитов и рассылки — без сторонних сервисов.',
   'Практика показывает: {pain}. {site} автоматизирует запись и помогает удерживать {client} повторными напоминаниями.',
   '{h1} — это не только форма на сайте. В {site} вы ведёте базу, анализируете визиты и отправляете акции в мессенджеры.',
+  '{site} помогает запустить {h1Lower} {cityPrepositional}: настройка занимает вечер, первые записи приходят в тот же день.',
+  '{ClientCap} {cityPrepositional} всё чаще выбирают мастеров с онлайн-записью. {site} даёт {genitive} ссылку, мессенджер-бот и календарь для записи 24/7.',
+  'Мастерам {cityGenitive} {site} объединяет запись, CRM и аналитику — без сложного внедрения и лишних модулей.',
+  'Сервис работает для {genitive} {cityPrepositional}: персональная страница мастера, календарь, мессенджер-бот и CRM без Excel.',
 ];
 
 const SECTION_BODIES = {
@@ -82,6 +86,13 @@ const SECTION_BODIES = {
     'Все данные на русском интерфейсе: не нужно обучать сотрудников сложной CRM — логика заточена под запись услуг.',
     'Тарифы прозрачны: бесплатный вход, оплата по факту записей или фиксированный безлимит для активного потока.',
   ],
+  mainWithCity: [
+    '{client} {city} всё чаще выбирают онлайн-запись: экономят время, не ждут ответа администратора и видят свободные окна в реальном времени.',
+    'В {cityPrepositional} {site} помогает {genitive} удерживать клиентов: персональная ссылка, мессенджер-бот и CRM без Excel.',
+    'Для мастеров {cityGenitive} важно показываться на первой странице поиска, когда клиент ищет «{h1Lower}». {site} оптимизирован под локальную выдачу.',
+    '{site} адаптирует страницу мастера под запросы из {cityGenitive}: прайс, район, время работы и контакты — всё на виду.',
+    'Команда {site} помогает запустить запись {cityPrepositional} за один вечер: перенос базы и подключение мессенджеров уже включены.',
+  ],
   features: [
     'Онлайн-календарь синхронизируется с реальным расписанием: двойные брони исключены.',
     'Карточка клиента хранит телефон, предпочтения, заметки мастера и дату последнего визита.',
@@ -92,6 +103,13 @@ const SECTION_BODIES = {
     'Портфолио и отзывы на странице усиливают конверсию из просмотра в запись.',
     'Экспорт и ручной ввод клиентов помогают перейти с блокнота или другой системы без потери базы.',
   ],
+  featuresWithCity: [
+    '{site} показывает мастеров {cityPrepositional} в локальной выдаче Яндекса и Google: район, адрес и контакт отображаются на странице.',
+    'Клиенты {cityGenitive} видят прайс, время работы и свободные слоты без регистрации — это ускоряет принятие решения.',
+    'Карточка клиента хранит заметки о предпочтениях, чтобы при повторном визите {cityPrepositional} мастер сразу предложил подходящее окно.',
+    'Бот в Telegram и MAX прижимает записи к расписанию с учётом перерывов и выходных в {cityPrepositional}.',
+    'Рассылки по базе учитывают часовой пояс и праздники {cityGenitive}: меньше пустых уведомлений, больше откликов.',
+  ],
   start: [
     'Регистрация занимает пару минут: email, название и первые услуги.',
     'Добавьте фото работ и цены — страница сразу выглядит профессионально для новых клиентов.',
@@ -99,6 +117,12 @@ const SECTION_BODIES = {
     'Отправьте ссылку постоянным клиентам: они привыкнут записываться сами, без звонков.',
     'Через неделю вы увидите, сколько времени освободилось за счёт автоматических напоминаний.',
     'При росте команды добавьте мастеров в один кабинет и разделите услуги по специалистам.',
+  ],
+  startWithCity: [
+    'Если уже работаете {cityPrepositional}, перенесите базу из таблицы или прошлой CRM — поддержка поможет за один вечер.',
+    'Для продвижения {cityPrepositional} подключите Яндекс.Карты и заполните адрес: страница появится в локальной выдаче.',
+    'Мастера {cityGenitive} чаще всего подключают бота в Telegram и публикуют ссылку в Instagram и VK — старт за один день.',
+    'Первые 30 записей — бесплатно: достаточно зарегистрироваться и принять заявки {cityPrepositional}.',
   ],
 };
 
@@ -139,6 +163,10 @@ const FAQ_QUESTIONS = [
   'Как снизить неявки с помощью {site}?',
   'Подходит ли {site}, если я работаю один?',
   'Есть ли мобильная версия для {genitive}?',
+  'Подходит ли {site} для {genitive} {cityPrepositional}?',
+  'Можно ли запустить {h1Lower} {cityPrepositional} без своего сайта?',
+  'Как привлечь клиентов {cityPrepositional} через локальную SEO-страницу?',
+  'Сколько мастеров в команде поддерживает {site}?',
 ];
 
 const FAQ_ANSWERS = [
@@ -150,6 +178,10 @@ const FAQ_ANSWERS = [
   'Включите напоминания в Telegram и MAX — клиенты чаще приходят вовремя и реже забывают о визите.',
   'Да, сервис создан для соло-мастеров: простой интерфейс без лишних модулей корпоративной CRM.',
   'Да, кабинет и страница записи корректно работают на смартфоне.',
+  'Да, {site} подходит для {genitive} {cityPrepositional}: есть локальная SEO-страница, Яндекс.Карты и мессенджер-бот.',
+  'Сайт не обязателен — персональной страницы {site} с прайсом и адресом хватит для первых записей {cityPrepositional}.',
+  'Подключите адрес, район и фотографии работ — {site} покажет страницу мастера по запросам из {cityGenitive} в Яндексе и Google.',
+  'В одном аккаунте можно вести команду до 10 мастеров, для крупных сетей есть индивидуальные условия.',
 ];
 
 const META_TEMPLATES = [
@@ -158,6 +190,10 @@ const META_TEMPLATES = [
   '{h1} без сложной настройки: прайс, портфолио, расписание и CRM для {genitive}. Тариф от 20 ₽ за запись.',
   '{site} — {h1Lower} для малого бизнеса: клиенты записываются сами, вы управляете загрузкой и базой.',
   'Автоматизируйте {h1Lower} с {site}: меньше звонков, больше записей, единая CRM для {genitive}.',
+  'Запись клиентов {cityPrepositional} без звонков: мессенджер-бот, CRM и локальная SEO-страница мастера от {site}.',
+  '{site} — онлайн-запись {cityPrepositional}: 24/7 запись, CRM, рассылки в Telegram и MAX, бесплатный вход.',
+  'Запустите запись клиентов {cityPrepositional} за один вечер: {site} даёт прайс, расписание и напоминания в мессенджерах.',
+  '{site} объединяет запись, CRM и аналитику для {genitive} {cityPrepositional} — без сложного внедрения.',
 ];
 
 const ARTICLE_INTROS = [
@@ -179,9 +215,10 @@ function getContext(category) {
   return NICHE_CONTEXT[category] || NICHE_CONTEXT.services;
 }
 
-function generateUniqueIntro(slug, { h1, genitive, category }) {
+function buildVars(slug, { h1, genitive, category, city }) {
   const ctx = getContext(category);
-  const vars = {
+  const clientCap = ctx.client ? ctx.client.charAt(0).toUpperCase() + ctx.client.slice(1) : '';
+  return {
     h1,
     h1Lower: h1.toLowerCase(),
     genitive: genitive || 'мастеров',
@@ -189,28 +226,25 @@ function generateUniqueIntro(slug, { h1, genitive, category }) {
     pain: ctx.pain,
     gain: ctx.gain,
     client: ctx.client,
+    ClientCap: clientCap,
+    city: city?.name || '',
+    cityPrepositional: city?.prepositional || '',
+    cityGenitive: city?.genitive || '',
   };
+}
+
+function generateUniqueIntro(slug, ctx) {
+  const vars = buildVars(slug, ctx);
   return fill(pickOne(INTRO_TEMPLATES, slug, 'intro'), vars);
 }
 
-function generateUniqueMeta(slug, { h1, genitive }) {
-  const vars = {
-    h1,
-    h1Lower: h1.toLowerCase(),
-    genitive: genitive || 'мастеров и салонов',
-    site: SITE_NAME,
-  };
+function generateUniqueMeta(slug, ctx) {
+  const vars = buildVars(slug, ctx);
   return fill(pickOne(META_TEMPLATES, slug, 'meta'), vars);
 }
 
-function generateUniqueSections(slug, { h1, genitive, category, pageType, variant }) {
-  const ctx = getContext(category);
-  const vars = {
-    h1,
-    genitive: genitive || 'мастеров',
-    site: SITE_NAME,
-    client: ctx.client,
-  };
+function generateUniqueSections(slug, { h1, genitive, category, pageType, variant, city } = {}) {
+  const vars = buildVars(slug, { h1, genitive, category, city });
 
   const h2Main = variant?.includes('crm') || pageType === 'crm'
     ? `CRM для ${vars.genitive}: как это работает`
@@ -224,11 +258,21 @@ function generateUniqueSections(slug, { h1, genitive, category, pageType, varian
 
   const h2Start = 'Запуск за один день';
 
-  const mainBody = fill(pickOne(SECTION_BODIES.main, slug, 's1'), vars)
-    + ' ' + fill(pickOne(SECTION_BODIES.main, slug, 's1b'), vars);
-  const featBody = fill(pickOne(SECTION_BODIES.features, slug, 's2'), vars)
-    + ' ' + fill(pickOne(ARTICLE_SECTION_EXTRA, slug, 's2x'), vars);
-  const startBody = fill(pickOne(SECTION_BODIES.start, slug, 's3'), vars);
+  const mainBase = fill(pickOne(SECTION_BODIES.main, slug, 's1'), vars);
+  const mainCity = city
+    ? ' ' + fill(pickOne(SECTION_BODIES.mainWithCity, slug, 's1c'), vars)
+    : '';
+  const mainBody = `${mainBase}${mainCity}`;
+  const featBase = fill(pickOne(SECTION_BODIES.features, slug, 's2'), vars);
+  const featCity = city
+    ? ' ' + fill(pickOne(SECTION_BODIES.featuresWithCity, slug, 's2c'), vars)
+    : '';
+  const featBody = `${featBase}${featCity}`;
+  const startBase = fill(pickOne(SECTION_BODIES.start, slug, 's3'), vars);
+  const startCity = city
+    ? ' ' + fill(pickOne(SECTION_BODIES.startWithCity, slug, 's3c'), vars)
+    : '';
+  const startBody = `${startBase}${startCity}`;
 
   return [
     {
@@ -249,18 +293,14 @@ function generateUniqueSections(slug, { h1, genitive, category, pageType, varian
   ];
 }
 
-function generateUniqueFaq(slug, { h1, genitive, category }) {
-  const ctx = getContext(category);
-  const vars = {
-    h1,
-    h1Lower: h1.toLowerCase(),
-    genitive: genitive || 'мастеров',
-    site: SITE_NAME,
-    client: ctx.client,
-  };
+function generateUniqueFaq(slug, ctx = {}) {
+  const vars = buildVars(slug, ctx);
 
-  const questions = pickMany(FAQ_QUESTIONS, slug, 'fq', 5);
-  const answers = pickMany(FAQ_ANSWERS, slug, 'fa', 5);
+  const questionPool = [...FAQ_QUESTIONS];
+  const answerPool = [...FAQ_ANSWERS];
+
+  const questions = pickMany(questionPool, slug, 'fq', 5);
+  const answers = pickMany(answerPool, slug, 'fa', 5);
 
   return questions.map((q, i) => ({
     q: fill(q, vars),
