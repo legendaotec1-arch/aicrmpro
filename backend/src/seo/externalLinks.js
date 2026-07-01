@@ -36,8 +36,10 @@ async function seedExternalLinks(dbConn = db) {
     const res = await dbConn.query(
       `INSERT INTO seo_external_links (
          link_key, platform, link_type, title, target_path, anchor_text,
-         priority, instructions, utm_source, utm_medium, utm_campaign, article_slug
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         priority, instructions, utm_source, utm_medium, utm_campaign, article_slug,
+         auto_submit, api_endpoint, payload_template, content_template,
+         submission_url, audience_size, domain_rating, requires_review, tags
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (link_key) DO UPDATE SET
          title = EXCLUDED.title,
          target_path = EXCLUDED.target_path,
@@ -48,6 +50,15 @@ async function seedExternalLinks(dbConn = db) {
          utm_medium = EXCLUDED.utm_medium,
          utm_campaign = EXCLUDED.utm_campaign,
          article_slug = EXCLUDED.article_slug,
+         auto_submit = EXCLUDED.auto_submit,
+         api_endpoint = EXCLUDED.api_endpoint,
+         payload_template = EXCLUDED.payload_template,
+         content_template = EXCLUDED.content_template,
+         submission_url = EXCLUDED.submission_url,
+         audience_size = EXCLUDED.audience_size,
+         domain_rating = EXCLUDED.domain_rating,
+         requires_review = EXCLUDED.requires_review,
+         tags = EXCLUDED.tags,
          updated_at = NOW()
        RETURNING (xmax = 0) AS is_insert`,
       [
@@ -63,6 +74,15 @@ async function seedExternalLinks(dbConn = db) {
         item.utm_medium || null,
         item.utm_campaign || null,
         item.article_slug || null,
+        item.auto_submit || 'manual',
+        item.api_endpoint || null,
+        item.payload_template || null,
+        item.content_template || null,
+        item.submission_url || null,
+        item.audience_size || null,
+        item.domain_rating || null,
+        item.requires_review === true,
+        item.tags || null,
       ]
     );
     if (res.rows[0]?.is_insert) inserted += 1;
@@ -130,6 +150,11 @@ async function updateExternalLink(dbConn, id, patch) {
     'anchor_text',
     'submitted_at',
     'live_at',
+    'last_attempt_at',
+    'last_attempt_status',
+    'last_attempt_message',
+    'live_post_url',
+    'external_url',
   ];
   const sets = [];
   const values = [];

@@ -111,6 +111,9 @@ export default function AdminSeoTab() {
   const [data, setData] = useState(null);
   const [externalLinks, setExternalLinks] = useState(null);
   const [updatingLinkId, setUpdatingLinkId] = useState(null);
+  const [autoSubmitting, setAutoSubmitting] = useState(false);
+  const [autoSubmitPreview, setAutoSubmitPreview] = useState(null);
+  const [autoSubmitLog, setAutoSubmitLog] = useState('');
   const [runningIntel, setRunningIntel] = useState(false);
   const [indexNow, setIndexNow] = useState(null);
   const [submittingIndexNow, setSubmittingIndexNow] = useState(false);
@@ -181,6 +184,44 @@ export default function AdminSeoTab() {
       setError(err?.response?.data?.error || 'Ошибка обновления ссылки');
     } finally {
       setUpdatingLinkId(null);
+    }
+  };
+
+  const runAutoSubmitBatch = async (platform) => {
+    setAutoSubmitting(true);
+    setError('');
+    setAutoSubmitLog('');
+    try {
+      const res = await seoAdminApi.post('/auto-submit/run', { limit: 10, platform });
+      setAutoSubmitLog(JSON.stringify(res.data, null, 2));
+      await loadExternalLinks();
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Ошибка автосабмита');
+    } finally {
+      setAutoSubmitting(false);
+    }
+  };
+
+  const previewAutoSubmit = async (linkKey) => {
+    try {
+      const res = await seoAdminApi.post('/auto-submit/link', { link_key: linkKey, dryRun: true });
+      setAutoSubmitPreview(res.data);
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Ошибка preview');
+    }
+  };
+
+  const submitOneLink = async (linkKey) => {
+    setAutoSubmitting(true);
+    setError('');
+    try {
+      const res = await seoAdminApi.post('/auto-submit/link', { link_key: linkKey });
+      setAutoSubmitLog(JSON.stringify(res.data, null, 2));
+      await loadExternalLinks();
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Ошибка сабмита');
+    } finally {
+      setAutoSubmitting(false);
     }
   };
 
@@ -744,14 +785,49 @@ export default function AdminSeoTab() {
           <div>
             <h3 className="font-semibold text-slate-900">Внешние ссылки</h3>
             <p className="text-xs text-slate-500">
-              VC.ru, Дзен, СПАРК, Habr, каталоги, партнёры — цель {extStats?.target || 30} качественных ссылок
+              82 площадки: VC.ru, Reddit, GitHub, Product Hunt, каталоги, соцсети — цель {extStats?.target || 30} live
             </p>
           </div>
-          <div className="text-right">
+          <div className="flex flex-col items-end gap-2">
             <p className="text-2xl font-bold text-violet-700">
               {fmtNum(extStats?.live || 0)} / {fmtNum(extStats?.target || 30)}
             </p>
             <p className="text-xs text-slate-500">опубликовано</p>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                disabled={autoSubmitting}
+                onClick={() => runAutoSubmitBatch()}
+                className="rounded-lg bg-violet-600 px-2 py-1 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                title="Запустить автосабмит для 10 запланированных площадок"
+              >
+                Автосабмит (10)
+              </button>
+              <button
+                type="button"
+                disabled={autoSubmitting}
+                onClick={() => runAutoSubmitBatch('reddit,producthunt,hackernews')}
+                className="rounded-lg border border-violet-200 px-2 py-1 text-xs font-semibold text-violet-600 hover:bg-violet-50 disabled:opacity-50"
+              >
+                Launch-пакет
+              </button>
+              <button
+                type="button"
+                disabled={autoSubmitting}
+                onClick={() => runAutoSubmitBatch('telegram,vk,social')}
+                className="rounded-lg border border-violet-200 px-2 py-1 text-xs font-semibold text-violet-600 hover:bg-violet-50 disabled:opacity-50"
+              >
+                Соцсети
+              </button>
+              <button
+                type="button"
+                disabled={autoSubmitting}
+                onClick={() => runAutoSubmitBatch('bookmark')}
+                className="rounded-lg border border-violet-200 px-2 py-1 text-xs font-semibold text-violet-600 hover:bg-violet-50 disabled:opacity-50"
+              >
+                Закладки
+              </button>
+            </div>
           </div>
         </div>
 
@@ -824,28 +900,72 @@ export default function AdminSeoTab() {
                       ) : null}
                     </td>
                     <td className="px-3 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          link.status === 'live'
-                            ? 'bg-emerald-100 text-emerald-800'
+                      <div className="flex flex-col items-start gap-1">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            link.status === 'live'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : link.status === 'in_progress'
+                                ? 'bg-sky-100 text-sky-800'
+                                : link.status === 'rejected'
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {link.status === 'live'
+                            ? 'Live'
                             : link.status === 'in_progress'
-                              ? 'bg-sky-100 text-sky-800'
+                              ? 'В работе'
                               : link.status === 'rejected'
-                                ? 'bg-rose-100 text-rose-800'
-                                : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {link.status === 'live'
-                          ? 'Live'
-                          : link.status === 'in_progress'
-                            ? 'В работе'
-                            : link.status === 'rejected'
-                              ? 'Отклонено'
-                              : 'План'}
-                      </span>
+                                ? 'Отклонено'
+                                : 'План'}
+                        </span>
+                        {link.auto_submit && link.auto_submit !== 'manual' ? (
+                          <span
+                            className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                              link.auto_submit === 'api'
+                                ? 'bg-violet-100 text-violet-700'
+                                : link.auto_submit === 'webhook'
+                                  ? 'bg-sky-100 text-sky-700'
+                                  : 'bg-emerald-100 text-emerald-700'
+                            }`}
+                            title={`Способ автосабмита: ${link.auto_submit}${link.requires_review ? ' (требует проверки)' : ''}`}
+                          >
+                            {link.auto_submit === 'api' ? 'API' : link.auto_submit === 'webhook' ? 'Webhook' : 'Form'}
+                            {link.requires_review ? ' ⚠' : ''}
+                          </span>
+                        ) : null}
+                        {link.last_attempt_status ? (
+                          <span className="text-[10px] text-slate-400" title={link.last_attempt_message || ''}>
+                            {link.last_attempt_at ? new Date(link.last_attempt_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''} · {link.last_attempt_status}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex flex-wrap gap-1">
+                        {link.auto_submit && link.auto_submit !== 'manual' && link.status !== 'live' ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={autoSubmitting}
+                              onClick={() => previewAutoSubmit(link.link_key)}
+                              className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                              title="Показать, что будет отправлено"
+                            >
+                              Preview
+                            </button>
+                            <button
+                              type="button"
+                              disabled={autoSubmitting}
+                              onClick={() => submitOneLink(link.link_key)}
+                              className="rounded-lg bg-violet-600 px-2 py-1 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                              title="Отправить на площадку прямо сейчас"
+                            >
+                              Auto
+                            </button>
+                          </>
+                        ) : null}
                         {link.status !== 'live' ? (
                           <button
                             type="button"
@@ -887,6 +1007,25 @@ export default function AdminSeoTab() {
             </tbody>
           </table>
         </div>
+        {(autoSubmitLog || autoSubmitPreview) && (
+          <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-4">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold text-slate-700">
+                {autoSubmitPreview ? 'Preview payload' : 'Результат автосабмита'}
+              </h4>
+              <button
+                type="button"
+                onClick={() => { setAutoSubmitLog(''); setAutoSubmitPreview(null); }}
+                className="text-xs font-semibold text-slate-400 hover:text-slate-600"
+              >
+                Закрыть
+              </button>
+            </div>
+            <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100">
+              {JSON.stringify(autoSubmitPreview || autoSubmitLog, null, 2)}
+            </pre>
+          </div>
+        )}
       </section>
     </div>
   );

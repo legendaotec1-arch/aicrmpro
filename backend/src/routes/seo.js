@@ -406,6 +406,70 @@ router.post('/external-links/seed', adminAuthMiddleware, async (_req, res) => {
   }
 });
 
+// ===== Auto-submit: автоматическая публикация на внешних площадках =====
+
+router.post('/auto-submit/run', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { runAutoSubmitBatch } = require('../seo/autoSubmit/orchestrator');
+    const { limit, platform, dryRun } = req.body || {};
+    const platforms = platform ? (Array.isArray(platform) ? platform : platform.split(',').map((s) => s.trim())) : null;
+    const result = await runAutoSubmitBatch({
+      limit: limit || 5,
+      platforms,
+      dryRun: !!dryRun,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('SEO auto-submit:', err);
+    res.status(500).json({ error: err.message || 'Ошибка автосабмита' });
+  }
+});
+
+router.post('/auto-submit/link', adminAuthMiddleware, async (req, res) => {
+  try {
+    const { submitLink, previewLink } = require('../seo/autoSubmit/orchestrator');
+    const { link_key, dryRun } = req.body || {};
+    if (!link_key) return res.status(400).json({ error: 'link_key обязателен' });
+    const r = await db.query('SELECT * FROM seo_external_links WHERE link_key = $1', [link_key]);
+    if (!r.rows.length) return res.status(404).json({ error: 'площадка не найдена' });
+    const link = r.rows[0];
+    if (dryRun) {
+      res.json({ mode: 'preview', preview: await previewLink(link) });
+    } else {
+      res.json({ mode: 'submit', result: await submitLink(link) });
+    }
+  } catch (err) {
+    console.error('SEO auto-submit link:', err);
+    res.status(500).json({ error: err.message || 'Ошибка' });
+  }
+});
+
+router.get('/auto-submit/adapters', adminAuthMiddleware, async (_req, res) => {
+  res.json({
+    adapters: [
+      { id: 'reddit', name: 'Reddit', env: ['REDDIT_OAUTH_TOKEN', 'REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET', 'REDDIT_USERNAME', 'REDDIT_PASSWORD'], requiresReview: false },
+      { id: 'telegram', name: 'Telegram', env: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHANNEL_ID'], requiresReview: false },
+      { id: 'vk', name: 'ВКонтакте', env: ['VK_ACCESS_TOKEN', 'VK_OWNER_ID'], requiresReview: false },
+      { id: 'press-feed', name: 'Press-feed', env: ['PRESS_FEED_API_KEY', 'PRESS_FEED_CONTACT_EMAIL'], requiresReview: true },
+      { id: 'producthunt', name: 'Product Hunt', env: ['PRODUCTHUNT_DEVELOPER_TOKEN'], requiresReview: true },
+      { id: 'github', name: 'GitHub Profile', env: ['GITHUB_TOKEN', 'GITHUB_USERNAME'], requiresReview: false },
+      { id: 'medium', name: 'Medium', env: ['MEDIUM_INTEGRATION_TOKEN'], requiresReview: false },
+      { id: 'linkedin', name: 'LinkedIn', env: ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_AUTHOR_URN'], requiresReview: true },
+      { id: 'twitter', name: 'Twitter / X', env: ['TWITTER_BEARER_TOKEN'], requiresReview: false },
+      { id: 'pinterest', name: 'Pinterest', env: ['PINTEREST_ACCESS_TOKEN', 'PINTEREST_BOARD_ID'], requiresReview: false },
+      { id: 'tumblr', name: 'Tumblr', env: ['TUMBLR_OAUTH_TOKEN'], requiresReview: false },
+      { id: 'mastodon', name: 'Mastodon', env: ['MASTODON_ACCESS_TOKEN', 'MASTODON_INSTANCE'], requiresReview: false },
+      { id: 'threads', name: 'Threads', env: ['THREADS_ACCESS_TOKEN', 'THREADS_USER_ID'], requiresReview: false },
+      { id: 'bluesky', name: 'Bluesky', env: ['BLUESKY_HANDLE', 'BLUESKY_APP_PASSWORD'], requiresReview: false },
+      { id: 'pocket', name: 'Pocket', env: ['POCKET_ACCESS_TOKEN'], requiresReview: false },
+      { id: 'raindrop', name: 'Raindrop.io', env: ['RAINDROP_TOKEN'], requiresReview: false },
+      { id: 'diigo', name: 'Diigo', env: ['DIIGO_API_KEY', 'DIIGO_USER'], requiresReview: false },
+      { id: 'delicious', name: 'Delicious', env: ['DELICIOUS_USER', 'DELICIOUS_PASSWORD'], requiresReview: false },
+      { id: 'mix', name: 'Mix (StumbleUpon)', env: ['MIX_TOKEN'], requiresReview: false },
+    ],
+  });
+});
+
 router.get('/intelligence', adminAuthMiddleware, async (_req, res) => {
   try {
     const { loadIntelligenceDashboard } = require('../seo/seoIntelligence');

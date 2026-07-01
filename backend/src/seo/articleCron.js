@@ -190,7 +190,18 @@ function startArticleCron() {
   // Вечер UTC — только синхронизация шаблонов
   cron.schedule('5 17 * * *', () => runSync('17:05', false));
 
-  console.log(`[seo-cron] Auto articles: ${ARTICLES_PER_DAY}/day, AI batch morning, sync 05:05 & 17:05 UTC`);
+  // Автосабмит внешних площадок: 3 площадки в день, пн-пт в 11:00 UTC
+  cron.schedule('0 11 * * 1-5', async () => {
+    try {
+      const { runAutoSubmitBatch } = require('./autoSubmit/orchestrator');
+      const r = await runAutoSubmitBatch({ limit: 3, platforms: ['reddit', 'telegram', 'vk', 'social'] });
+      console.log(`[auto-submit cron] ${r.total} platforms processed`);
+    } catch (err) {
+      console.error('[auto-submit cron] failed:', err.message);
+    }
+  });
+
+  console.log(`[seo-cron] Auto articles: ${ARTICLES_PER_DAY}/day, AI batch morning, sync 05:05 & 17:05 UTC, auto-submit 11:00 UTC weekdays`);
 }
 
 module.exports = { syncArticlePipeline, startArticleCron, upsertArticle, reschedulePendingArticles };

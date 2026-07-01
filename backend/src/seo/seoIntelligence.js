@@ -58,8 +58,24 @@ async function upsertPage(client, page) {
 }
 
 async function persistClusters(db, clusters) {
+  // Merge с уже сохранёнными ручными маппингами: не даём cron'у затереть
+  // mapped_slug, если админ/мы сами проставили посадочную вручную
+  // (например, для брендовых кластеров вроде «woner ru» → /voner).
+  const manualRes = await db.query(
+    `SELECT cluster_key, mapped_slug, status
+     FROM seo_keyword_clusters
+     WHERE mapped_slug IS NOT NULL
+       AND status = 'mapped'`
+  );
+  const manualMap = new Map(manualRes.rows.map((r) => [r.cluster_key, r.mapped_slug]));
+
   await db.query('DELETE FROM seo_keyword_clusters');
   for (const c of clusters) {
+    // Если кластер уже был замаплен вручную — сохраняем маппинг, даже если
+    // кластеризатор не нашёл подходящую посадочную.
+    const manualSlug = manualMap.get(c.clusterKey);
+    const mappedSlug = manualSlug || c.mappedSlug;
+    const status = mappedSlug ? 'mapped' : c.status;
     await db.query(
       `INSERT INTO seo_keyword_clusters (
          cluster_key, label, intent, niche, keywords, keyword_count,
@@ -75,8 +91,8 @@ async function persistClusters(db, clusters) {
         c.totalImpressions,
         c.totalClicks,
         c.avgPosition,
-        c.mappedSlug,
-        c.status,
+        mappedSlug,
+        status,
       ]
     );
   }

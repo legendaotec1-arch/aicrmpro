@@ -78,13 +78,20 @@ function buildRecommendations(page, stats, content, hasSearchData) {
   }
 
   if (!hasSearchData && impressions === 0) {
-    recs.push({
-      issue_type: 'zero_impressions',
-      severity: 'info',
-      recommendation:
-        `Нет данных Вебмастера по /${slug}. После синхронизации метрик проверьте показы. Пока: усильте intro, FAQ и перелинковку.`,
-      actions: ['sync_metrics', 'expand_intro', 'add_faq'],
-    });
+    // Показываем info-рекомендацию только если страница уже давно опубликована
+    // (≥ 14 дней) — для свежих страниц это нормальное состояние, шумиху
+    // поднимать не надо.
+    const createdMs = page.created_at ? new Date(page.created_at).getTime() : 0;
+    const ageDays = createdMs ? (Date.now() - createdMs) / (1000 * 60 * 60 * 24) : 0;
+    if (ageDays >= 14) {
+      recs.push({
+        issue_type: 'zero_impressions',
+        severity: 'info',
+        recommendation:
+          `Нет данных Вебмастера по /${slug}. После синхронизации метрик проверьте показы. Пока: усильте intro, FAQ и перелинковку.`,
+        actions: ['sync_metrics', 'expand_intro', 'add_faq'],
+      });
+    }
   }
 
   if (content.thinIntro) {
@@ -156,7 +163,7 @@ async function analyzeContentGaps(db) {
   const hasSearchData = impressionMap.size > 0;
 
   const pagesRes = await db.query(`
-    SELECT slug, page_type, cluster, niche, title, h1, meta_description, intro, sections, faq, priority
+    SELECT slug, page_type, cluster, niche, title, h1, meta_description, intro, sections, faq, priority, created_at
     FROM seo_pages WHERE published = TRUE
     ORDER BY priority DESC
   `);

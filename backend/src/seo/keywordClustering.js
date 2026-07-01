@@ -314,6 +314,16 @@ async function clusterKeywords(db) {
       ];
       mappedSlug = candidates.find((c) => pageSlugs.has(c)) || null;
     }
+    if (!mappedSlug && bucket.intent === 'general') {
+      // Брендовые и общие вопросы: маппим на главную/о-сервисе, чтобы
+      // админ не видел «нет посадочной» для кластеров вроде «woner ru».
+      const candidates = ['voner', 'woner-ru', 'o-servise', 'o-woner', 'index'];
+      mappedSlug = candidates.find((c) => pageSlugs.has(c)) || null;
+      if (!mappedSlug) {
+        // Запасной вариант: первая доступная посадочная из БД.
+        mappedSlug = [...pageSlugs][0] || null;
+      }
+    }
 
     bucket.mappedSlug = mappedSlug;
     bucket.status = mappedSlug ? 'mapped' : (bucket.totalImpressions > 0 ? 'gap' : 'unmapped');

@@ -91,31 +91,49 @@ async function fetchYandexMetrics(dateFrom, dateTo) {
   const hostId = await resolveYandexHostId(userId);
   if (!hostId) throw new Error('Yandex Webmaster: host not found');
 
-  const data = await yandexRequest(
-    yandexHostPath(userId, hostId, '/search-queries/popular'),
-    {
-      date_from: dateFrom,
-      date_to: dateTo,
-      order_by: 'TOTAL_SHOWS',
-      query_indicator: 'TOTAL_SHOWS',
-      device_type_indicator: 'ALL',
-    }
-  );
+  // Яндекс отдаёт только ОДИН query_indicator за запрос. Делаем 3 параллельных
+  // запроса и мерджим результаты по query_id / query_text, чтобы получить
+  // показы + клики + позицию одним проходом.
+  const baseParams = { date_from: dateFrom, date_to: dateTo, order_by: 'TOTAL_SHOWS', device_type_indicator: 'ALL' };
+  const [showsData, clicksData, posData] = await Promise.all([
+    yandexRequest(yandexHostPath(userId, hostId, '/search-queries/popular'), { ...baseParams, query_indicator: 'TOTAL_SHOWS' }).catch(() => ({ queries: [] })),
+    yandexRequest(yandexHostPath(userId, hostId, '/search-queries/popular'), { ...baseParams, query_indicator: 'TOTAL_CLICKS' }).catch(() => ({ queries: [] })),
+    yandexRequest(yandexHostPath(userId, hostId, '/search-queries/popular'), { ...baseParams, query_indicator: 'AVG_SHOW_POSITION' }).catch(() => ({ queries: [] })),
+  ]);
 
-  const queries = (data?.queries || []).map((row) => {
-    const indicators = row.indicators || {};
-    const shows = Number(indicators.TOTAL_SHOWS?.value ?? indicators.TOTAL_SHOWS ?? 0);
-    const clicks = Number(indicators.TOTAL_CLICKS?.value ?? indicators.TOTAL_CLICKS ?? 0);
-    const position = Number(indicators.AVG_SHOW_POSITION?.value ?? indicators.AVG_SHOW_POSITION ?? 0);
-    return {
-      query: row.query_text || row.query || '',
-      page_url: row.url || null,
+  const buildMap = (rows, key) => {
+    const map = new Map();
+    rows.forEach((row) => {
+      const k = row.query_id || row.query_text || row.query;
+      const indicators = row.indicators || {};
+      const first = Object.values(indicators)[0];
+      const val = Number(first?.value ?? first ?? 0);
+      map.set(k, { url: row.url || null, value: val });
+    });
+    return map;
+  };
+
+  const showsMap = buildMap(showsData?.queries || [], 'shows');
+  const clicksMap = buildMap(clicksData?.queries || [], 'clicks');
+  const posMap = buildMap(posData?.queries || [], 'position');
+
+  const queries = [];
+  for (const [key, info] of showsMap.entries()) {
+    const shows = info.value;
+    const clicks = clicksMap.get(key)?.value || 0;
+    const position = posMap.get(key)?.value || null;
+    queries.push({
+      query: (posMap.get(key) && (posData.queries.find((r) => (r.query_id || r.query_text) === key)?.query_text))
+        || (clicksData.queries.find((r) => (r.query_id || r.query_text) === key)?.query_text)
+        || (showsData.queries.find((r) => (r.query_id || r.query_text) === key)?.query_text)
+        || String(key),
+      page_url: info.url || clicksMap.get(key)?.url || posMap.get(key)?.url || null,
       impressions: shows,
       clicks,
       ctr: shows > 0 ? clicks / shows : 0,
       position: position || null,
-    };
-  });
+    });
+  }
 
   const totals = queries.reduce(
     (acc, q) => {
@@ -269,12 +287,45 @@ async function syncSearchMetrics(db, { days = 28 } = {}) {
   const dateTo = todayStr();
   const dateFrom = daysAgo(days);
 
+  // Историческая синхронизация: итерируем по дням, чтобы заполнить
+  // seo_metrics_daily и seo_query_stats за весь запрошенный период.
+  // Без этого графики «Динамика показов» и avg position остаются пустыми.
+  const dates = [];
+  for (let i = days; i >= 0; i -= 1) {
+    dates.push(daysAgo(i));
+  }
+
   if (config.yandex) {
     try {
-      const data = await fetchYandexMetrics(dateFrom, dateTo);
-      await upsertDailyMetrics(db, dateTo, 'yandex', data.totals);
-      await replaceQueryStats(db, dateTo, 'yandex', data.queries);
-      results.yandex = { ok: true, queries: data.queries.length, ...data.totals };
+      let totalQueries = 0;
+      const yandexTotals = { impressions: 0, clicks: 0, positionWeighted: 0, positionWeight: 0 };
+      for (const day of dates) {
+        const data = await fetchYandexMetrics(day, day);
+        await upsertDailyMetrics(db, day, 'yandex', data.totals);
+        await replaceQueryStats(db, day, 'yandex', data.queries);
+        totalQueries += data.queries.length;
+        yandexTotals.impressions += data.totals.impressions;
+        yandexTotals.clicks += data.totals.clicks;
+        if (data.totals.avgPosition != null) {
+          yandexTotals.positionWeighted += data.totals.avgPosition * data.totals.impressions;
+          yandexTotals.positionWeight += data.totals.impressions;
+        }
+        // Яндекс Вебмастер ограничивает ~5 запросов в секунду на пользователя.
+        // Делаем по 4 запроса в день (3 индикатора параллельно = 3 запроса), но
+        // чтобы не упереться в лимит между днями, делаем паузу.
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      const avgPosition = yandexTotals.positionWeight > 0
+        ? yandexTotals.positionWeighted / yandexTotals.positionWeight
+        : null;
+      results.yandex = {
+        ok: true,
+        queries: totalQueries,
+        impressions: yandexTotals.impressions,
+        clicks: yandexTotals.clicks,
+        ctr: yandexTotals.impressions > 0 ? yandexTotals.clicks / yandexTotals.impressions : 0,
+        avgPosition,
+      };
     } catch (err) {
       const hint = err.code === 'HOST_NOT_LOADED'
         ? 'Данные по woner.ru ещё не загружены в API Вебмастера — подождите 1–3 дня после подтверждения сайта'
@@ -286,6 +337,7 @@ async function syncSearchMetrics(db, { days = 28 } = {}) {
   if (config.google) {
     try {
       const data = await fetchGoogleMetrics(dateFrom, dateTo);
+      // Google Search Console поддерживает диапазоны, сохраняем итог за период.
       await upsertDailyMetrics(db, dateTo, 'google', data.totals);
       await replaceQueryStats(db, dateTo, 'google', data.queries);
       results.google = { ok: true, queries: data.queries.length, ...data.totals };
@@ -304,6 +356,8 @@ async function syncSearchMetrics(db, { days = 28 } = {}) {
     const avgPosition = posWeight > 0
       ? posParts.reduce((s, x) => s + x.avgPosition * x.impressions, 0) / posWeight
       : null;
+    // Сохраняем combined только за dateTo (последний день) — это не для графика,
+    // а для быстрого чтения «итого за период» в loadSearchMetrics fallback.
     await upsertDailyMetrics(db, dateTo, 'combined', {
       impressions,
       clicks,
@@ -331,10 +385,13 @@ async function loadSearchMetrics(db, { days = 28 } = {}) {
   let latest = null;
 
   try {
+    // Берём все дни для каждого источника, чтобы получить реальную динамику.
+    // combined нам не нужен, потому что он хранится только за последний день
+    // (для быстрого чтения «итого»). Графики строятся по per-source daily.
     const dailyRes = await db.query(
       `SELECT metric_date, source, impressions, clicks, ctr, avg_position, synced_at
        FROM seo_metrics_daily
-       WHERE source = 'combined' AND metric_date >= $1
+       WHERE source IN ('yandex', 'google') AND metric_date >= $1
        ORDER BY metric_date ASC`,
       [since]
     );
